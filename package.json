@@ -1,5 +1,5 @@
 {
-  "name": "agnostix-dataset-annotation",
+  "name": "agnostix-annotator",
   "private": true,
   "version": "0.0.0",
   "type": "module",

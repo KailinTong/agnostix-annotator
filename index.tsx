@@ -1,37 +1,116 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
   Upload, Play, Pause, SkipBack, SkipForward, 
   CheckCircle, Box as BoxIcon, FileJson, Video as VideoIcon, 
   ChevronRight, Save, MousePointer2, Trash2, ArrowLeft,
-  Clock, AlertTriangle, Info, Crosshair, Plus, Minus
+  Clock, AlertTriangle, Info, Crosshair, Plus, Minus,
+  HardDrive, RefreshCw, Folder, AlertCircle, Check, X, FilePlus,
+  Maximize, Minimize, Tag, Edit3, Settings
 } from 'lucide-react';
 
-// --- DENM Data Model ---
+// --- DENM Data Model (Strictly based on QA_type_denm.json provided) ---
 const DENM_MAPPING: any = {
-  categories: {
-    "a": { name: "Temporary slippery road", causeCodes: [6, 9] },
-    "b": { name: "Animal / people / obstacles / debris on the road", causeCodes: [10, 11, 12, 94] },
-    "c": { name: "Unprotected accident area", causeCodes: [2] },
-    "d": { name: "Short term road works", causeCodes: [3, 15] },
-    "e": { name: "Reduced visibility", causeCodes: [18] },
-    "f": { name: "Wrong-way driver", causeCodes: [14] },
-    "h": { name: "Exceptional weather conditions", causeCodes: [17, 19] }
-  },
   causeCodes: {
-    "2": { name: "accident", subCauseCodes: { "7": "unsecured accident" } },
-    "3": { name: "roadworks", subCauseCodes: { "2": "road marking work", "3": "slow moving road maintenance", "4": "short-term stationary roadworks" } },
-    "6": { name: "adverseWeatherCondition-adhesion", subCauseCodes: { "0": "slippery road (generic)", "2": "fuel on road", "3": "mud on road", "5": "ice on road", "6": "black ice on road", "7": "oil on road", "8": "loose chippings" } },
-    "9": { name: "hazardousLocation-surfaceCondition", subCauseCodes: { "0": "flooding", "5": "snow drifts" } },
-    "10": { name: "hazardousLocation-obstacleOnTheRoad", subCauseCodes: { "0": "objects on the road", "1": "shed load", "4": "large objects", "5": "fallen trees" } },
-    "11": { name: "hazardousLocation-animalOnTheRoad", subCauseCodes: { "0": "animals on roadway", "2": "herd of animals", "4": "large animals" } },
-    "12": { name: "humanPresenceOnTheRoad", subCauseCodes: { "0": "people on roadway", "1": "children on roadway", "2": "cyclists on roadway" } },
-    "14": { name: "wrongWayDriving", subCauseCodes: { "0": "wrong way driving" } },
-    "15": { name: "rescueAndRecoveryWorkInProgress", subCauseCodes: { "0": "rescue and recovery work in progress" } },
-    "17": { name: "adverseWeatherCondition-ExtremeWeather", subCauseCodes: { "1": "strong winds" } },
-    "18": { name: "adverseWeatherCondition-Visibility", subCauseCodes: { "0": "visibility reduced (generic)", "1": "visibility reduced due to fog", "2": "visibility reduced due to smoke", "3": "visibility reduced due to heavy snowfall", "6": "visibility reduced due to low sun glare" } },
-    "19": { name: "adverseWeatherCondition-Precipitation", subCauseCodes: { "1": "heavy rain", "2": "heavy snowfall" } },
-    "94": { name: "vehicleBreakdown", subCauseCodes: { "2": "broken down vehicle" } }
+    "2": {
+      "name": "accident",
+      "subCauseCodes": {
+        "7": "unsecured accident"
+      }
+    },
+    "3": {
+      "name": "roadworks",
+      "subCauseCodes": {
+        "2": "road marking work",
+        "3": "slow moving road maintenance",
+        "4": "short-term stationary roadworks"
+      }
+    },
+    "6": {
+      "name": "adverseWeatherCondition-adhesion",
+      "subCauseCodes": {
+        "0": "slippery road (generic)",
+        "2": "fuel on road",
+        "3": "mud on road",
+        "5": "ice on road",
+        "6": "black ice on road",
+        "7": "oil on road",
+        "8": "loose chippings"
+      }
+    },
+    "9": {
+      "name": "hazardousLocation-surfaceCondition",
+      "subCauseCodes": {
+        "0": "flooding",
+        "5": "snow drifts"
+      }
+    },
+    "10": {
+      "name": "hazardousLocation-obstacleOnTheRoad",
+      "subCauseCodes": {
+        "0": "objects on the road",
+        "1": "shed load",
+        "4": "large objects",
+        "5": "fallen trees"
+      }
+    },
+    "11": {
+      "name": "hazardousLocation-animalOnTheRoad",
+      "subCauseCodes": {
+        "0": "animals on roadway",
+        "2": "herd of animals",
+        "4": "large animals"
+      }
+    },
+    "12": {
+      "name": "humanPresenceOnTheRoad",
+      "subCauseCodes": {
+        "0": "people on roadway",
+        "1": "children on roadway",
+        "2": "cyclists on roadway"
+      }
+    },
+    "14": {
+      "name": "wrongWayDriving",
+      "subCauseCodes": {
+        "0": "wrong way driving"
+      }
+    },
+    "15": {
+      "name": "rescueAndRecoveryWorkInProgress",
+      "subCauseCodes": {
+        "0": "rescue and recovery work in progress"
+      }
+    },
+    "17": {
+      "name": "adverseWeatherCondition-ExtremeWeather",
+      "subCauseCodes": {
+        "1": "strong winds"
+      }
+    },
+    "18": {
+      "name": "adverseWeatherCondition-Visibility",
+      "subCauseCodes": {
+        "0": "visibility reduced (generic)",
+        "1": "visibility reduced due to fog",
+        "2": "visibility reduced due to smoke",
+        "3": "visibility reduced due to heavy snowfall",
+        "6": "visibility reduced due to low sun glare"
+      }
+    },
+    "19": {
+      "name": "adverseWeatherCondition-Precipitation",
+      "subCauseCodes": {
+        "1": "heavy rain",
+        "2": "heavy snowfall"
+      }
+    },
+    "94": {
+      "name": "vehicleBreakdown",
+      "subCauseCodes": {
+        "2": "broken down vehicle"
+      }
+    }
   }
 };
 
@@ -73,7 +152,7 @@ const formatTime = (seconds: number) => {
 const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, title = '' }: any) => {
   const base = "px-3 py-1.5 rounded text-sm font-medium transition-colors flex items-center gap-2 select-none";
   const variants: any = {
-    primary: "bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-800 disabled:opacity-50",
+    primary: "bg-blue-600 hover:bg-blue-700 text-white disabled:bg-gray-800 disabled:text-gray-500 disabled:cursor-not-allowed",
     secondary: "bg-gray-700 hover:bg-gray-600 text-gray-100 disabled:opacity-50",
     danger: "bg-red-900/50 hover:bg-red-900 text-red-200 border border-red-800",
     ghost: "hover:bg-gray-800 text-gray-300",
@@ -99,21 +178,21 @@ const CoordControl: React.FC<CoordControlProps> = ({ label, value, onChange }) =
     return (
         <div className="flex flex-col items-center gap-1">
             <span className="text-[10px] uppercase font-bold text-gray-500">{label}</span>
-            <div className="flex items-center bg-gray-900 rounded border border-gray-700 overflow-hidden">
+            <div className="flex items-center bg-gray-900 rounded-lg border border-gray-700 overflow-hidden shadow-sm">
                 <button 
-                    className="w-6 h-6 flex items-center justify-center hover:bg-gray-800 text-gray-400 hover:text-white transition-colors border-r border-gray-700 active:bg-gray-700"
+                    className="w-6 h-7 flex items-center justify-center bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-colors border-r border-gray-700 active:bg-gray-600"
                     onClick={() => onChange(value - 20)}
                     title="-20"
                 ><Minus className="w-3 h-3" /></button>
                 <input 
-                    key={value /* Key ensures input re-renders if value changes externally */}
+                    key={value}
                     type="number" 
-                    className="w-12 bg-transparent text-xs text-center outline-none font-mono py-1 appearance-none text-gray-200"
+                    className="w-14 bg-gray-950 text-xs text-center outline-none font-mono py-1 appearance-none text-blue-200"
                     value={displayValue}
                     onChange={(e) => onChange(Number(e.target.value))}
                 />
                 <button 
-                    className="w-6 h-6 flex items-center justify-center hover:bg-gray-800 text-gray-400 hover:text-white transition-colors border-l border-gray-700 active:bg-gray-700"
+                    className="w-6 h-7 flex items-center justify-center bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-colors border-l border-gray-700 active:bg-gray-600"
                     onClick={() => onChange(value + 20)}
                     title="+20"
                 ><Plus className="w-3 h-3" /></button>
@@ -127,10 +206,11 @@ const CoordControl: React.FC<CoordControlProps> = ({ label, value, onChange }) =
 const App = () => {
   const [jsonFile, setJsonFile] = useState<File | null>(null);
   const [jsonData, setJsonData] = useState<DatasetItem[]>([]);
+  // videoFiles maps filename -> URL
   const [videoFiles, setVideoFiles] = useState<Map<string, string>>(new Map());
   const [isWorkspaceActive, setIsWorkspaceActive] = useState(false);
   const [isDragging, setIsDragging] = useState<'json' | 'video' | null>(null);
-
+  
   // Selection
   const [selectedItemIndex, setSelectedItemIndex] = useState<number>(-1);
   const [activeKeyframe, setActiveKeyframe] = useState<0 | 1>(0); // 0 = Start Frame, 1 = End Frame
@@ -139,11 +219,59 @@ const App = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [fps, setFps] = useState(30);
   
   // Video Reference State (Robust handling of refs)
   const [videoNode, setVideoNode] = useState<HTMLVideoElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Persistence Key
+  const STORAGE_KEY = 'denm_project_v1';
+
+  // --- Persistence Logic ---
+
+  // Load on Mount
+  useEffect(() => {
+    const savedData = localStorage.getItem(STORAGE_KEY);
+    
+    if (savedData) {
+        try {
+            const { jsonData: savedJson, videoMap: savedMap } = JSON.parse(savedData);
+            setJsonData(savedJson);
+            // Restore persistent remote URLs (Drive links or generic URLs), but local blob URLs are invalid
+            const newMap = new Map<string, string>();
+            if (savedMap) {
+                Object.entries(savedMap).forEach(([k, v]) => {
+                    if (typeof v === 'string' && v.startsWith('http')) {
+                        newMap.set(k, v as string);
+                    }
+                });
+            }
+            setVideoFiles(newMap);
+        } catch (e) {
+            console.error("Failed to restore session", e);
+        }
+    }
+  }, []);
+
+  // Save on Change
+  useEffect(() => {
+    if (jsonData.length === 0) return;
+    
+    const timeout = setTimeout(() => {
+        // We only persist remote URLs, not blobs
+        const persistentMap: Record<string, string> = {};
+        videoFiles.forEach((v, k) => {
+            if (v.startsWith('http')) persistentMap[k] = v;
+        });
+
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+            jsonData,
+            videoMap: persistentMap
+        }));
+    }, 1000); // Debounce 1s
+
+    return () => clearTimeout(timeout);
+  }, [jsonData, videoFiles]);
 
   // --- Parsing Logic ---
 
@@ -170,6 +298,13 @@ const App = () => {
                         box_2d: [], description: ""
                     };
                 }
+            } else {
+                 item._parsed = {
+                        incident: 0, message_type: 'none', 
+                        cause_code: null, sub_cause_code: null, 
+                        cause_text: null, sub_cause_text: null, 
+                        box_2d: [], description: ""
+                    };
             }
             return item;
         });
@@ -204,6 +339,43 @@ const App = () => {
       } else {
           setIsDragging(type);
       }
+  };
+
+  const startWorkspace = () => {
+      if (jsonData.length === 0 && videoFiles.size > 0) {
+          // Auto-generate from videos
+          const generated: DatasetItem[] = Array.from(videoFiles.keys()).map((fname, i) => ({
+              id: i,
+              video: fname as string,
+              conversations: [
+                  { from: "human", value: `<video>\nAnalyze the traffic situation.` },
+                  { from: "assistant", value: "" } // Will be filled on export
+              ],
+              _parsed: {
+                  incident: 0, 
+                  message_type: "none", 
+                  cause_code: null, 
+                  sub_cause_code: null, 
+                  cause_text: null, 
+                  sub_cause_text: null, 
+                  box_2d: [], 
+                  description: ""
+              }
+          }));
+          setJsonData(generated);
+      }
+      setSelectedItemIndex(0);
+      setIsWorkspaceActive(true);
+  };
+
+  const updateMeta = (key: string, value: any) => {
+      setJsonData(prev => {
+          if (selectedItemIndex === -1) return prev;
+          const newData = [...prev];
+          // Use spread to create a new object reference
+          newData[selectedItemIndex] = { ...newData[selectedItemIndex], [key]: value };
+          return newData;
+      });
   };
 
   const updateField = (key: keyof IncidentData, value: any) => {
@@ -304,27 +476,55 @@ const App = () => {
       // Serialize back to string
       const exportData = jsonData.map(item => {
           const newItem = { ...item };
-          if (newItem._parsed && newItem.conversations) {
+          
+          const { 
+              incident, message_type, cause_code, sub_cause_code, 
+              cause_text, sub_cause_text, box_2d, description 
+          } = newItem._parsed || {};
+          
+          // Ensure correct schema typing for NULLs
+          const cleanParsed: IncidentData = {
+              incident: incident || 0, 
+              message_type: incident === 1 ? "DENM" : "none", 
+              cause_code: incident === 1 ? (cause_code || null) : null, 
+              sub_cause_code: incident === 1 ? (sub_cause_code || null) : null,
+              cause_text: incident === 1 ? (cause_text || null) : null, 
+              sub_cause_text: incident === 1 ? (sub_cause_text || null) : null, 
+              box_2d: incident === 1 ? (box_2d || []) : [], 
+              description: description || ""
+          };
+
+          const jsonStr = JSON.stringify(cleanParsed);
+
+          // Update/Create Assistant Message
+          if (!newItem.conversations || newItem.conversations.length === 0) {
+              newItem.conversations = [
+                  { from: "human", value: `<video>\nAnalyze the road scene frame(s) from the given traffic video and output a STRICT JSON object with ONLY these keys:\n- "incident": 1 if a real traffic incident/hazard is visible in the video, else 0.\n- "message_type": "DENM" if incident=1, else "none".\n- "cause_code": integer if incident=1, else null.\n- "sub_cause_code": integer if incident=1, else null.\n- "cause_text": string if incident=1, else null.\n- "sub_cause_text": string if incident=1, else null.\n- "box_2d": if incident=1, provide TWO spatiotemporal boxes for the main hazardous object:\n    [t_0, ymin_0, xmin_0, ymax_0, xmax_0],\n    [t_1, ymin_1, xmin_1, ymax_1, xmax_1]\n  where t is normalized 0–1 and coordinates are normalized to 0–1000 with (0,0) at top-left.\n  If incident=0, box_2d must be [].\n- "description": short factual description of the scene and the hazard (if any).\n\nRules:\n- Output JSON only (no extra text, no extra keys).\n- If incident=1 → message_type MUST be "DENM", box_2d MUST contain exactly 2 entries, and the code/text MUST match the snippet above exactly.\n- If incident=0 → message_type MUST be "none\", all code/text fields MUST be null, and box_2d MUST be [].\n` },
+                  { from: "assistant", value: jsonStr }
+              ];
+          } else {
               const assistantIdx = newItem.conversations.findIndex(c => c.from === 'assistant');
               if (assistantIdx !== -1) {
-                  // Reconstruct object to enforce schema and clean any extra properties
-                  const { 
-                      incident, message_type, cause_code, sub_cause_code, 
-                      cause_text, sub_cause_text, box_2d, description 
-                  } = newItem._parsed;
-                  
-                  const cleanParsed: IncidentData = {
-                      incident, message_type, cause_code, sub_cause_code,
-                      cause_text, sub_cause_text, box_2d, description
-                  };
-
                   newItem.conversations = [...newItem.conversations];
                   newItem.conversations[assistantIdx] = {
                       ...newItem.conversations[assistantIdx],
-                      value: JSON.stringify(cleanParsed)
+                      value: jsonStr
                   };
+              } else {
+                  newItem.conversations = [...newItem.conversations, { from: "assistant", value: jsonStr }];
               }
           }
+          
+          // Update root 'type' field based on cause text
+          if (cleanParsed.incident === 1 && cleanParsed.cause_text) {
+              // Format: "accident - unsecured accident" (lowercase preferred based on examples)
+              const cText = cleanParsed.cause_text.toLowerCase();
+              const sText = cleanParsed.sub_cause_text ? cleanParsed.sub_cause_text.toLowerCase() : "";
+              newItem.type = sText ? `${cText} - ${sText}` : cText;
+          } else {
+              newItem.type = "none";
+          }
+          
           // Remove internal working field before export
           if ('_parsed' in newItem) {
               delete newItem._parsed;
@@ -339,6 +539,14 @@ const App = () => {
       a.download = jsonFile ? `annotated_${jsonFile.name}` : 'annotated_dataset.json';
       a.click();
   };
+
+  const clearSession = () => {
+      if(confirm("Are you sure? This will delete saved progress.")) {
+          localStorage.removeItem(STORAGE_KEY);
+          setJsonData([]);
+          setVideoFiles(new Map());
+      }
+  }
 
   // --- Video Logic ---
 
@@ -369,41 +577,108 @@ const App = () => {
   // --- Render ---
 
   if (!isWorkspaceActive) {
+      const canStart = jsonData.length > 0 || videoFiles.size > 0;
+
       return (
           <div className="min-h-screen bg-gray-950 text-gray-100 flex items-center justify-center p-8 font-sans">
-              <div className="max-w-2xl w-full bg-gray-900 rounded-xl border border-gray-800 p-8 shadow-2xl">
-                  <div className="text-center mb-10">
-                      <div className="bg-blue-600/20 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                          <Info className="w-8 h-8 text-blue-500" />
-                      </div>
-                      <h1 className="text-3xl font-bold mb-2">DENM Annotator</h1>
-                      <p className="text-gray-400">Strict schema validation for Incident Datasets</p>
+              <div className="max-w-3xl w-full bg-gray-900 rounded-xl border border-gray-800 p-8 shadow-2xl">
+                  
+                  {/* Header */}
+                  <div className="flex items-start justify-between mb-8">
+                    <div>
+                        <h1 className="text-3xl font-bold mb-2 flex items-center gap-3">
+                            <span className="bg-blue-600/20 p-2 rounded-lg"><Info className="w-6 h-6 text-blue-500" /></span>
+                            DENM Annotator
+                        </h1>
+                        <p className="text-gray-400">Strict schema validation & Autosave support</p>
+                    </div>
+                    {jsonData.length > 0 && (
+                        <div className="flex items-center gap-4 bg-gray-800 p-2 rounded-lg border border-gray-700">
+                             <span className="text-xs text-green-400 font-medium flex items-center gap-1">
+                                 <RefreshCw className="w-3 h-3" /> Session Restored
+                             </span>
+                             <div className="h-4 w-px bg-gray-700" />
+                             <button onClick={clearSession} className="text-xs text-red-400 hover:text-red-300">Clear</button>
+                        </div>
+                    )}
                   </div>
-                  <div className="grid grid-cols-2 gap-6">
-                      <div 
-                        className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${isDragging === 'json' ? 'border-blue-500 bg-blue-500/10' : 'border-gray-700 hover:border-gray-500'}`}
+
+                  {/* Input Grid */}
+                  <div className="space-y-6">
+                      
+                      {/* JSON Input */}
+                      <label 
+                        htmlFor="json-up"
+                        className={`block border-2 border-dashed rounded-xl p-6 transition-colors relative cursor-pointer group ${isDragging === 'json' ? 'border-blue-500 bg-blue-500/10' : 'border-gray-700 hover:border-blue-500 hover:bg-gray-800/50'}`}
                         onDragOver={e => handleDrag(e, 'json')} onDragLeave={e => handleDrag(e, null)} onDrop={e => handleDrag(e, 'json')}
                       >
-                          <input type="file" accept=".json" className="hidden" id="json-up" onChange={e => e.target.files?.[0] && processJsonFile(e.target.files[0])} />
-                          <label htmlFor="json-up" className="cursor-pointer block h-full">
-                              <FileJson className="w-10 h-10 mx-auto mb-3 text-gray-500" />
-                              <div className="text-sm font-medium">{jsonFile ? jsonFile.name : "Upload JSON"}</div>
-                          </label>
-                      </div>
+                          <input type="file" accept=".json" id="json-up" className="hidden" onChange={e => e.target.files?.[0] && processJsonFile(e.target.files[0])} />
+                          
+                          <div className="flex items-center gap-4 pointer-events-none">
+                              <div className="bg-blue-500/10 p-3 rounded-full group-hover:bg-blue-500/20 transition-colors">
+                                  <FileJson className="w-6 h-6 text-blue-500" />
+                              </div>
+                              <div className="flex-1">
+                                  <h3 className="font-bold text-gray-200 group-hover:text-blue-200 transition-colors">1. Dataset JSON</h3>
+                                  <p className="text-sm text-gray-500 group-hover:text-gray-400">
+                                      {jsonFile ? jsonFile.name : (jsonData.length > 0 ? `${jsonData.length} items loaded from session` : "Drop .json file here (optional)")}
+                                  </p>
+                              </div>
+                              <div className="bg-gray-700 text-gray-100 px-3 py-1.5 rounded text-sm font-medium transition-colors group-hover:bg-blue-600 group-hover:text-white">
+                                  Select File
+                              </div>
+                          </div>
+                      </label>
+
+                      {/* Video Input */}
                       <div 
-                        className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${isDragging === 'video' ? 'border-purple-500 bg-purple-500/10' : 'border-gray-700 hover:border-gray-500'}`}
+                        className={`border-2 border-dashed rounded-xl p-6 transition-colors cursor-pointer relative ${isDragging === 'video' ? 'border-purple-500 bg-purple-500/10' : 'border-gray-700 hover:border-purple-500 hover:bg-gray-800/50'}`}
                         onDragOver={e => handleDrag(e, 'video')} onDragLeave={e => handleDrag(e, null)} onDrop={e => handleDrag(e, 'video')}
                       >
-                          <input type="file" accept="video/*" multiple className="hidden" id="vid-up" onChange={e => e.target.files && processVideoFiles(e.target.files)} />
-                          <label htmlFor="vid-up" className="cursor-pointer block h-full">
-                              <VideoIcon className="w-10 h-10 mx-auto mb-3 text-gray-500" />
-                              <div className="text-sm font-medium">{videoFiles.size > 0 ? `${videoFiles.size} Videos` : "Upload Videos"}</div>
-                          </label>
-                      </div>
+                            <input type="file" accept="video/*" multiple className="hidden" id="vid-up" onChange={e => e.target.files && processVideoFiles(e.target.files)} />
+                            <input 
+                                type="file" 
+                                // @ts-ignore
+                                webkitdirectory=""
+                                directory=""
+                                className="hidden" 
+                                id="dir-up" 
+                                onChange={e => e.target.files && processVideoFiles(e.target.files)} 
+                            />
+
+                            <div className="flex items-center gap-4">
+                                <div className="bg-purple-500/10 p-3 rounded-full">
+                                    <VideoIcon className="w-6 h-6 text-purple-500" />
+                                </div>
+                                <div className="flex-1">
+                                    <h3 className="font-bold text-gray-200">2. Video Files</h3>
+                                    <p className="text-sm text-gray-500">
+                                        {videoFiles.size > 0 ? `${videoFiles.size} videos ready` : "Drop videos or folder here"}
+                                    </p>
+                                    {jsonData.length > 0 && videoFiles.size === 0 && (
+                                        <p className="text-xs text-orange-400 mt-1 flex items-center gap-1">
+                                            <AlertCircle className="w-3 h-3" /> Please re-upload videos to resume
+                                        </p>
+                                    )}
+                                </div>
+                                
+                                <div className="flex items-center gap-2">
+                                    <label htmlFor="dir-up" className="bg-gray-700 hover:bg-purple-600 text-white px-3 py-1.5 rounded text-sm font-medium transition-colors cursor-pointer flex items-center gap-2">
+                                        <Folder className="w-4 h-4" /> Folder
+                                    </label>
+                                    <div className="w-px h-6 bg-gray-600"></div>
+                                    <label htmlFor="vid-up" className="bg-gray-700 hover:bg-purple-600 text-white px-3 py-1.5 rounded text-sm font-medium transition-colors cursor-pointer flex items-center gap-2">
+                                        <VideoIcon className="w-4 h-4" /> Files
+                                    </label>
+                                </div>
+                            </div>
+                       </div>
+
                   </div>
+                  
                   <div className="mt-8 flex justify-end">
-                      <Button onClick={() => { setSelectedItemIndex(0); setIsWorkspaceActive(true); }} disabled={!jsonFile}>
-                          Start Annotating <ChevronRight className="w-4 h-4" />
+                      <Button onClick={startWorkspace} disabled={!canStart}>
+                          {jsonData.length === 0 ? "Create New Dataset" : "Start Verifying"} <ChevronRight className="w-4 h-4" />
                       </Button>
                   </div>
               </div>
@@ -422,14 +697,24 @@ const App = () => {
       if (match) videoUrl = videoFiles.get(match) || videoFiles.get(match.split('/').pop()!);
   }
 
+  // Compute Type Display
+  let typeDisplay = "none";
+  if (parsed?.incident === 1 && parsed.cause_text) {
+      typeDisplay = parsed.cause_text;
+      if (parsed.sub_cause_text) typeDisplay += ` - ${parsed.sub_cause_text}`;
+  }
+
   return (
-    <div className="h-screen flex flex-col bg-gray-950 text-gray-200 overflow-hidden">
+    <div className="h-screen flex flex-col bg-gray-950 text-gray-200 overflow-hidden font-sans selection:bg-blue-500/30">
       {/* Header */}
-      <header className="h-12 bg-gray-900 border-b border-gray-800 flex items-center justify-between px-4 shrink-0">
+      <header className="h-12 bg-gray-900 border-b border-gray-800 flex items-center justify-between px-4 shrink-0 z-20">
           <div className="flex items-center gap-3 cursor-pointer" onClick={() => setIsWorkspaceActive(false)}>
               <ArrowLeft className="w-4 h-4" />
               <span className="font-bold text-sm">DENM Studio</span>
-              <span className="text-xs text-gray-500">{jsonFile?.name}</span>
+              <span className="text-xs text-gray-500">{jsonFile ? jsonFile.name : (jsonData.length > 0 ? "Existing Dataset" : "New Dataset")}</span>
+              <span className="text-xs bg-gray-800 px-2 py-0.5 rounded text-gray-400">
+                  {videoUrl ? (videoUrl.startsWith('http') ? 'Remote' : 'Local') : 'No Video'}
+              </span>
           </div>
           <Button onClick={downloadJson} variant="primary" className="h-8">
               <Save className="w-4 h-4" /> Export
@@ -438,12 +723,12 @@ const App = () => {
 
       <div className="flex-1 flex overflow-hidden">
           {/* List */}
-          <aside className="w-64 bg-gray-900 border-r border-gray-800 flex flex-col shrink-0">
+          <aside className="w-64 bg-gray-900 border-r border-gray-800 flex flex-col shrink-0 z-10">
               <div className="flex-1 overflow-y-auto custom-scrollbar">
                   {jsonData.map((it, i) => (
                       <div key={it.id || i} 
                            onClick={() => setSelectedItemIndex(i)}
-                           className={`px-4 py-3 border-b border-gray-800 cursor-pointer flex justify-between items-center ${selectedItemIndex === i ? 'bg-blue-900/20 border-l-2 border-l-blue-500' : ''}`}>
+                           className={`px-4 py-3 border-b border-gray-800 cursor-pointer flex justify-between items-center transition-colors ${selectedItemIndex === i ? 'bg-blue-900/20 border-l-2 border-l-blue-500' : 'hover:bg-gray-800'}`}>
                           <div className="truncate text-xs font-mono text-gray-400">{it.video}</div>
                           {it._parsed?.incident === 1 && <AlertTriangle className="w-3 h-3 text-orange-500" />}
                       </div>
@@ -454,9 +739,9 @@ const App = () => {
           {/* Main */}
           <main className="flex-1 bg-black flex flex-col relative">
                {/* Player */}
-               <div className="flex-1 relative flex items-center justify-center overflow-hidden">
+               <div className="flex-1 relative flex items-center justify-center overflow-hidden bg-black/50">
                    {videoUrl ? (
-                       <div className="relative group max-h-full max-w-full">
+                       <div className="relative group max-h-full max-w-full flex items-center justify-center h-full">
                            <video 
                               ref={(el) => {
                                   videoRef.current = el;
@@ -464,11 +749,16 @@ const App = () => {
                                   if (el !== videoNode) setVideoNode(el);
                               }}
                               src={videoUrl} 
-                              className="max-h-[calc(100vh-250px)] max-w-full shadow-lg"
+                              // Drive videos might need controls to be manually forced if headers are strict
+                              crossOrigin={videoUrl.startsWith('http') ? "anonymous" : undefined}
+                              className="max-h-[calc(100vh-200px)] max-w-full shadow-lg"
                               onClick={() => isPlaying ? videoRef.current?.pause() : videoRef.current?.play()}
                               onPlay={() => setIsPlaying(true)}
                               onPause={() => setIsPlaying(false)}
+                              // Handle errors for remote videos
+                              onError={(e) => console.log("Video Load Error", e)}
                            />
+
                            {/* Ensure BoxOverlay only renders when videoNode is ready */}
                            {parsed && parsed.incident === 1 && parsed.box_2d.length === 2 && videoNode && (
                                <BoxOverlay 
@@ -479,76 +769,84 @@ const App = () => {
                            )}
                        </div>
                    ) : (
-                       <div className="text-gray-600">No Video</div>
+                       <div className="text-gray-600 flex flex-col items-center">
+                           <VideoIcon className="w-12 h-12 mb-2 opacity-50" />
+                           <p>No Video Source</p>
+                           <p className="text-xs text-gray-500 mt-2">Upload files/folder to resume</p>
+                       </div>
                    )}
                </div>
 
                {/* Toolbar */}
-               <div className="h-40 bg-gray-900 border-t border-gray-800 shrink-0 p-4">
-                  {/* Play Controls */}
-                  <div className="flex items-center gap-4 mb-4">
-                      <Button variant="secondary" onClick={() => isPlaying ? videoRef.current?.pause() : videoRef.current?.play()}>
+               <div className="bg-gray-900 border-t border-gray-800 shrink-0 flex flex-col z-20 shadow-[-5px_0_15px_rgba(0,0,0,0.5)]">
+                  {/* Play Controls Row */}
+                  <div className="flex items-center gap-4 px-4 py-2 border-b border-gray-800">
+                      <Button variant="ghost" onClick={() => isPlaying ? videoRef.current?.pause() : videoRef.current?.play()}>
                           {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                       </Button>
-                      <div className="text-sm font-mono text-gray-400">
+                      <div className="text-xs font-mono text-gray-400 min-w-[100px]">
                           {formatTime(currentTime)} / {formatTime(duration)}
                       </div>
                       <input 
                           type="range" min={0} max={duration || 100} step={0.1} value={currentTime}
                           onChange={e => seekTo(Number(e.target.value))}
-                          className="flex-1 accent-blue-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                          className="flex-1 accent-blue-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer hover:h-1.5 transition-all"
                       />
                   </div>
                   
-                  {/* Spatiotemporal Editor */}
+                  {/* Spatiotemporal Editor Row */}
                   {parsed && parsed.incident === 1 && parsed.box_2d.length === 2 ? (
-                      <div className="flex items-center gap-4 bg-gray-800 p-2 rounded-lg border border-gray-700">
-                          <span className="text-xs font-bold text-gray-500 uppercase px-2">Keyframe Editor</span>
+                      <div className="flex items-center gap-6 px-4 py-3 overflow-x-auto">
+                          <div className="flex flex-col gap-0.5 min-w-max">
+                              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider leading-none">Keyframe</span>
+                              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider leading-none">Editor</span>
+                          </div>
                           
-                          {[0, 1].map((idx) => {
-                              const t = parsed.box_2d[idx][0];
-                              const isActive = activeKeyframe === idx;
-                              return (
-                                  <div key={idx} 
-                                       className={`flex items-center gap-2 px-3 py-1.5 rounded cursor-pointer border ${isActive ? 'bg-blue-900/30 border-blue-500 text-blue-200' : 'bg-gray-700/30 border-transparent hover:bg-gray-700'}`}
-                                       onClick={() => { setActiveKeyframe(idx as 0|1); seekTo(t * duration); }}
-                                  >
-                                      <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-blue-400' : 'bg-gray-500'}`} />
-                                      <span className="text-xs font-bold">{idx === 0 ? 'Start' : 'End'}</span>
-                                      <code className="text-xs font-mono opacity-70">t={t.toFixed(4)}</code>
-                                  </div>
-                              )
-                          })}
+                          <div className="flex bg-gray-800 rounded-lg p-1 gap-1 border border-gray-700">
+                              {[0, 1].map((idx) => {
+                                  const t = parsed.box_2d[idx][0];
+                                  const isActive = activeKeyframe === idx;
+                                  return (
+                                      <button key={idx} 
+                                           className={`flex items-center gap-2 px-3 py-1.5 rounded transition-colors text-xs font-medium ${isActive ? 'bg-blue-600 text-white shadow-sm' : 'hover:bg-gray-700 text-gray-400'}`}
+                                           onClick={() => { setActiveKeyframe(idx as 0|1); seekTo(t * duration); }}
+                                      >
+                                          <div className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-white' : 'bg-gray-500'}`} />
+                                          <span className="whitespace-nowrap">{idx === 0 ? 'Start' : 'End'} <span className="opacity-60 font-mono font-normal">t={t.toFixed(4)}</span></span>
+                                      </button>
+                                  )
+                              })}
+                          </div>
+
+                          <div className="h-8 w-px bg-gray-800" />
 
                           {/* Manual Time Input */}
-                          <div className="flex flex-col ml-2">
-                             <label className="text-[10px] uppercase font-bold text-gray-500 mb-1">Time (s)</label>
-                             <div className="flex items-center bg-gray-900 rounded border border-gray-700 overflow-hidden w-24">
+                          <div className="flex flex-col gap-1 items-center">
+                             <label className="text-[10px] uppercase font-bold text-gray-500">Time (s)</label>
+                             <div className="flex items-center bg-gray-950 rounded-lg border border-gray-700 overflow-hidden w-20 shadow-sm">
                                 <input 
                                     type="number"
                                     step={0.01}
                                     min={0}
                                     max={duration}
-                                    className="w-full bg-transparent text-xs font-mono text-white p-1 outline-none text-right"
+                                    className="w-full bg-transparent text-xs font-mono text-blue-200 p-1 text-center outline-none"
                                     value={(parsed.box_2d[activeKeyframe][0] * duration).toFixed(2)}
                                     onChange={(e) => {
                                         const s = parseFloat(e.target.value);
                                         if(!isNaN(s) && duration > 0) {
-                                             // Pass a complete new box tuple
                                              const old = parsed.box_2d[activeKeyframe];
                                              const newBox: IncidentBox = [s / duration, old[1], old[2], old[3], old[4]];
                                              updateBox(activeKeyframe, newBox);
                                         }
                                     }}
                                 />
-                                <div className="pr-2 pl-1 text-gray-500 text-[10px]">s</div>
                              </div>
                           </div>
 
-                          <div className="h-6 w-px bg-gray-700 mx-2" />
+                          <div className="h-8 w-px bg-gray-800" />
 
                           {/* Coordinate Controls */}
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-3">
                              {[1, 2, 3, 4].map(idx => {
                                  const labels = ["Y-Min", "X-Min", "Y-Max", "X-Max"];
                                  return (
@@ -566,47 +864,108 @@ const App = () => {
                              })}
                           </div>
 
-                          <div className="h-6 w-px bg-gray-700 mx-2" />
+                          <div className="flex-1" />
 
-                          <Button variant="outline" className="text-xs h-7" 
+                          <Button variant="outline" className="text-xs h-8 whitespace-nowrap" 
                             onClick={() => {
                                 // Sync time
                                 const newT = duration > 0 ? currentTime / duration : 0;
                                 const currentBox = parsed.box_2d[activeKeyframe];
-                                // Update t in the tuple [t, ymin, xmin, ymax, xmax]
                                 updateBox(activeKeyframe, [newT, currentBox[1], currentBox[2], currentBox[3], currentBox[4]]);
                             }}>
                               <Clock className="w-3 h-3" /> Sync Time
                           </Button>
                       </div>
                   ) : (
-                      <div className="text-xs text-gray-500 flex items-center gap-2">
-                          <Info className="w-4 h-4" /> Enable "Incident" to edit bounding boxes.
+                      <div className="flex items-center justify-center p-4 text-xs text-gray-500 gap-2 h-[88px]">
+                          <Info className="w-4 h-4" /> Enable "Incident" in the sidebar to access the Spatiotemporal Editor.
                       </div>
                   )}
                </div>
           </main>
 
           {/* Inspector */}
-          <aside className="w-96 bg-gray-900 border-l border-gray-800 flex flex-col overflow-y-auto">
+          <aside className="w-96 bg-gray-900 border-l border-gray-800 flex flex-col overflow-y-auto shrink-0 z-10 shadow-[-5px_0_20px_rgba(0,0,0,0.2)]">
               {parsed ? (
-                  <div className="p-4 space-y-6">
+                  <div className="p-6 space-y-6">
+
+                      {/* Metadata Section */}
+                      <div className="space-y-4">
+                          <div className="flex items-center gap-2 mb-2 pb-2 border-b border-gray-800">
+                              <Tag className="w-4 h-4 text-blue-500" />
+                              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Metadata</h3>
+                          </div>
+                          
+                          <div className="grid grid-cols-[1fr_2fr] gap-4">
+                             <div className="space-y-1">
+                                 <label className="text-[10px] font-bold text-gray-500 uppercase">ID</label>
+                                 <input 
+                                     type="number"
+                                     className="w-full bg-gray-950 border border-gray-700 text-sm text-gray-200 rounded-md px-3 py-2 focus:border-blue-500 outline-none font-mono transition-colors"
+                                     value={item.id}
+                                     onChange={(e) => updateMeta('id', parseInt(e.target.value) || 0)}
+                                 />
+                             </div>
+                             <div className="space-y-1">
+                                 <label className="text-[10px] font-bold text-gray-500 uppercase">Sample ID</label>
+                                 <input 
+                                     type="text"
+                                     className="w-full bg-gray-950 border border-gray-700 text-sm text-gray-200 rounded-md px-3 py-2 focus:border-blue-500 outline-none font-mono transition-colors"
+                                     value={item.sample_id || ""}
+                                     onChange={(e) => updateMeta('sample_id', e.target.value)}
+                                     title={item.sample_id}
+                                 />
+                             </div>
+                          </div>
+
+                          <div className="space-y-1">
+                               <label className="text-[10px] font-bold text-gray-500 uppercase">Video Filename</label>
+                               <input 
+                                   type="text"
+                                   className="w-full bg-gray-950 border border-gray-700 text-sm text-gray-300 rounded-md px-3 py-2 focus:border-blue-500 outline-none font-mono truncate transition-colors"
+                                   value={item.video || ""}
+                                   onChange={(e) => updateMeta('video', e.target.value)}
+                                   title={item.video}
+                               />
+                          </div>
+
+                          <div className="space-y-1">
+                               <label className="text-[10px] font-bold text-gray-500 uppercase">Computed Type</label>
+                               <input 
+                                   disabled
+                                   className="w-full bg-gray-800 border border-gray-700 text-sm text-gray-400 rounded-md px-3 py-2 font-mono"
+                                   value={typeDisplay}
+                               />
+                          </div>
+                      </div>
+                      
+                      <div className="h-px bg-gray-800" />
                       
                       {/* Incident Toggle */}
-                      <div className="flex items-center justify-between p-3 bg-gray-800 rounded-lg border border-gray-700">
+                      <div className="flex items-center justify-between p-4 bg-gray-800/30 rounded-xl border border-gray-700/50">
                           <span className="text-sm font-bold text-gray-200">Traffic Incident?</span>
-                          <div className="flex bg-gray-900 rounded p-1">
+                          <div className="flex bg-gray-950 rounded-lg p-1 border border-gray-800">
                               <button 
                                 onClick={() => updateField('incident', 0)}
-                                className={`px-3 py-1 text-xs font-bold rounded ${parsed.incident === 0 ? 'bg-gray-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}>
+                                className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${parsed.incident === 0 ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-500 hover:text-gray-300'}`}>
                                 NO
                               </button>
                               <button 
                                 onClick={() => updateField('incident', 1)}
-                                className={`px-3 py-1 text-xs font-bold rounded ${parsed.incident === 1 ? 'bg-red-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}>
+                                className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${parsed.incident === 1 ? 'bg-red-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-300'}`}>
                                 YES
                               </button>
                           </div>
+                      </div>
+
+                      {/* Message Type Display */}
+                      <div className="space-y-1">
+                           <label className="text-[10px] font-bold text-gray-500 uppercase">Message Type</label>
+                           <input 
+                               disabled
+                               className={`w-full text-sm font-bold font-mono py-2 px-3 rounded-md border ${parsed.message_type === 'DENM' ? 'bg-blue-900/10 border-blue-500/50 text-blue-400' : 'bg-gray-800 border-gray-700 text-gray-500'}`}
+                               value={parsed.message_type}
+                           />
                       </div>
 
                       {parsed.incident === 1 && (
@@ -615,7 +974,7 @@ const App = () => {
                               <div className="space-y-2">
                                   <label className="text-xs font-bold text-gray-500 uppercase">Cause Code</label>
                                   <select 
-                                      className="w-full bg-gray-800 border border-gray-700 text-sm text-white rounded p-2 focus:border-blue-500 outline-none"
+                                      className="w-full bg-gray-950 border border-gray-700 text-sm text-white rounded-md p-2.5 focus:border-blue-500 outline-none"
                                       value={parsed.cause_code || ""}
                                       onChange={e => {
                                           const v = e.target.value;
@@ -627,16 +986,13 @@ const App = () => {
                                           <option key={code} value={code}>{code} - {info.name}</option>
                                       ))}
                                   </select>
-                                  <div className="text-xs text-gray-500 font-mono bg-black/20 p-1 rounded">
-                                      Text: {parsed.cause_text || "null"}
-                                  </div>
                               </div>
 
                               {/* Sub Cause Code */}
                               <div className="space-y-2">
                                   <label className="text-xs font-bold text-gray-500 uppercase">Sub Cause Code</label>
                                   <select 
-                                      className="w-full bg-gray-800 border border-gray-700 text-sm text-white rounded p-2 focus:border-blue-500 outline-none"
+                                      className="w-full bg-gray-950 border border-gray-700 text-sm text-white rounded-md p-2.5 focus:border-blue-500 outline-none"
                                       value={parsed.sub_cause_code || ""}
                                       onChange={e => {
                                           const v = e.target.value;
@@ -651,28 +1007,19 @@ const App = () => {
                                           ))
                                       }
                                   </select>
-                                  <div className="text-xs text-gray-500 font-mono bg-black/20 p-1 rounded">
-                                      Text: {parsed.sub_cause_text || "null"}
-                                  </div>
                               </div>
                           </>
                       )}
 
                       {/* Description */}
-                      <div className="space-y-2">
+                      <div className="space-y-2 flex-1 flex flex-col">
                           <label className="text-xs font-bold text-gray-500 uppercase">Description</label>
                           <textarea 
-                              className="w-full bg-gray-800 border border-gray-700 text-sm text-white rounded p-2 h-32 focus:border-blue-500 outline-none resize-none"
+                              className="w-full flex-1 bg-gray-800/50 border border-gray-700 text-sm text-white rounded-md p-3 focus:border-blue-500 outline-none resize-none min-h-[120px]"
                               value={parsed.description || ""}
                               onChange={e => updateField('description', e.target.value)}
                               placeholder="Describe the scene and hazard..."
                           />
-                      </div>
-
-                      <div className="pt-4 border-t border-gray-800">
-                           <div className="text-xs text-gray-600 font-mono">
-                               Type: {parsed.message_type}
-                           </div>
                       </div>
 
                   </div>
@@ -767,14 +1114,14 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate }: any) => {
         height: `${(ymax - ymin) / 10}%`
     };
 
-    const color = activeKeyframe === 0 ? 'rgb(59, 130, 246)' : 'rgb(168, 85, 247)';
-    const bg = activeKeyframe === 0 ? 'rgba(59, 130, 246, 0.2)' : 'rgba(168, 85, 247, 0.2)';
+    const color = activeKeyframe === 0 ? 'rgb(37, 99, 235)' : 'rgb(37, 99, 235)'; // Both blue in screenshot for loop
+    const bg = 'rgba(37, 99, 235, 0.2)';
 
     return (
         <div ref={containerRef} className="absolute inset-0 z-20 pointer-events-none">
              {/* Only the box interacts, background passes through */}
              <div 
-                className="absolute border-2 pointer-events-auto cursor-move group touch-none"
+                className="absolute border-2 pointer-events-auto cursor-move group touch-none shadow-[0_0_15px_rgba(37,99,235,0.5)]"
                 style={{ ...style, borderColor: color, backgroundColor: bg }}
                 onMouseDown={(e) => {
                     e.stopPropagation();
@@ -792,7 +1139,7 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate }: any) => {
                 {/* Handles */}
                 {/* NW */}
                 <div 
-                    className="absolute -top-2 -left-2 w-5 h-5 bg-white border-2 rounded-full cursor-nw-resize shadow-sm hover:scale-110 transition-transform"
+                    className="absolute -top-1.5 -left-1.5 w-4 h-4 bg-white border-2 rounded-full cursor-nw-resize shadow-sm hover:scale-110 transition-transform"
                     style={{ borderColor: color }}
                     onMouseDown={(e) => {
                          e.stopPropagation();
@@ -801,7 +1148,7 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate }: any) => {
                 />
                 {/* NE */}
                 <div 
-                    className="absolute -top-2 -right-2 w-5 h-5 bg-white border-2 rounded-full cursor-ne-resize shadow-sm hover:scale-110 transition-transform"
+                    className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-white border-2 rounded-full cursor-ne-resize shadow-sm hover:scale-110 transition-transform"
                     style={{ borderColor: color }}
                     onMouseDown={(e) => {
                          e.stopPropagation();
@@ -810,7 +1157,7 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate }: any) => {
                 />
                 {/* SW */}
                 <div 
-                    className="absolute -bottom-2 -left-2 w-5 h-5 bg-white border-2 rounded-full cursor-sw-resize shadow-sm hover:scale-110 transition-transform"
+                    className="absolute -bottom-1.5 -left-1.5 w-4 h-4 bg-white border-2 rounded-full cursor-sw-resize shadow-sm hover:scale-110 transition-transform"
                     style={{ borderColor: color }}
                     onMouseDown={(e) => {
                          e.stopPropagation();
@@ -819,7 +1166,7 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate }: any) => {
                 />
                 {/* SE */}
                 <div 
-                    className="absolute -bottom-2 -right-2 w-5 h-5 bg-white border-2 rounded-full cursor-se-resize shadow-sm hover:scale-110 transition-transform"
+                    className="absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-white border-2 rounded-full cursor-se-resize shadow-sm hover:scale-110 transition-transform"
                     style={{ borderColor: color }}
                     onMouseDown={(e) => {
                          e.stopPropagation();
