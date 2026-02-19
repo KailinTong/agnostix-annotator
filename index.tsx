@@ -765,6 +765,7 @@ const App = () => {
                                   activeKeyframe={activeKeyframe}
                                   boxData={parsed.box_2d}
                                   onUpdate={updateBox}
+                                  onTogglePlay={() => isPlaying ? videoRef.current?.pause() : videoRef.current?.play()}
                                />
                            )}
                        </div>
@@ -1036,10 +1037,10 @@ const App = () => {
 
 // --- Overlay ---
 
-const BoxOverlay = ({ activeKeyframe, boxData, onUpdate }: any) => {
+const BoxOverlay = ({ activeKeyframe, boxData, onUpdate, onTogglePlay }: any) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [dragState, setDragState] = useState<{
-        mode: 'move' | 'nw' | 'ne' | 'sw' | 'se';
+        mode: 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'draw';
         startX: number;
         startY: number;
         startBox: IncidentBox; // [t, ymin, xmin, ymax, xmax]
@@ -1052,6 +1053,31 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate }: any) => {
             if (!containerRef.current) return;
             const rect = containerRef.current.getBoundingClientRect();
             if (rect.width === 0 || rect.height === 0) return;
+
+            // Common normalization logic
+            const normalize = (val: number, dim: number) => (val / dim) * 1000;
+            
+            if (dragState.mode === 'draw') {
+                const startXRel = normalize(dragState.startX - rect.left, rect.width);
+                const startYRel = normalize(dragState.startY - rect.top, rect.height);
+                const currXRel = normalize(e.clientX - rect.left, rect.width);
+                const currYRel = normalize(e.clientY - rect.top, rect.height);
+
+                const nXmin = Math.min(startXRel, currXRel);
+                const nXmax = Math.max(startXRel, currXRel);
+                const nYmin = Math.min(startYRel, currYRel);
+                const nYmax = Math.max(startYRel, currYRel);
+
+                const clampedBox: IncidentBox = [
+                    dragState.startBox[0], // Keep time
+                    Math.max(0, Math.min(1000, nYmin)),
+                    Math.max(0, Math.min(1000, nXmin)),
+                    Math.max(0, Math.min(1000, nYmax)),
+                    Math.max(0, Math.min(1000, nXmax))
+                ];
+                onUpdate(activeKeyframe, clampedBox);
+                return;
+            }
 
             const dxPx = e.clientX - dragState.startX;
             const dyPx = e.clientY - dragState.startY;
@@ -1092,7 +1118,19 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate }: any) => {
             onUpdate(activeKeyframe, clampedBox);
         };
 
-        const handleUp = () => setDragState(null);
+        const handleUp = (e: MouseEvent) => {
+            if (dragState.mode === 'draw') {
+                const dist = Math.sqrt(
+                    Math.pow(e.clientX - dragState.startX, 2) + 
+                    Math.pow(e.clientY - dragState.startY, 2)
+                );
+                // If moved less than 5px, treat as click
+                if (dist < 5 && onTogglePlay) {
+                    onTogglePlay();
+                }
+            }
+            setDragState(null);
+        };
 
         window.addEventListener('mousemove', handleMove);
         window.addEventListener('mouseup', handleUp);
@@ -1100,7 +1138,7 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate }: any) => {
             window.removeEventListener('mousemove', handleMove);
             window.removeEventListener('mouseup', handleUp);
         };
-    }, [dragState, activeKeyframe, onUpdate]);
+    }, [dragState, activeKeyframe, onUpdate, onTogglePlay]);
 
     if (!boxData || !boxData[activeKeyframe]) return null;
 
@@ -1118,7 +1156,19 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate }: any) => {
     const bg = 'rgba(37, 99, 235, 0.2)';
 
     return (
-        <div ref={containerRef} className="absolute inset-0 z-20 pointer-events-none">
+        <div 
+            ref={containerRef} 
+            className="absolute inset-0 z-20 cursor-crosshair"
+            onMouseDown={(e) => {
+                // Start drawing
+                setDragState({ 
+                    mode: 'draw', 
+                    startX: e.clientX, 
+                    startY: e.clientY, 
+                    startBox: [...boxData[activeKeyframe]] as IncidentBox 
+                });
+            }}
+        >
              {/* Only the box interacts, background passes through */}
              <div 
                 className="absolute border-2 pointer-events-auto cursor-move group touch-none shadow-[0_0_15px_rgba(37,99,235,0.5)]"
