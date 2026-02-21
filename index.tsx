@@ -246,12 +246,11 @@ const App = () => {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   
-  // Video Reference State (Robust handling of refs)
-  const [videoNode, setVideoNode] = useState<HTMLVideoElement | null>(null);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+    const [videoNode, setVideoNode] = useState<HTMLVideoElement | null>(null);
+    const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  // Persistence Key
-  const STORAGE_KEY = 'denm_project_v1';
+    // Persistence Key
+    const STORAGE_KEY = 'denm_project_v1';
 
   // --- Persistence Logic ---
 
@@ -291,7 +290,18 @@ const App = () => {
         });
 
         localStorage.setItem(STORAGE_KEY, JSON.stringify({
-            jsonData,
+            jsonData: jsonData.map(item => {
+                const { ...rest } = item;
+                // Ensure we don't accidentally persist any DOM nodes or circular refs
+                // that might have leaked into the object via [key: string]: any
+                return Object.fromEntries(
+                    Object.entries(rest).filter(([k, v]) => 
+                        k !== 'videoNode' && 
+                        typeof v !== 'function' && 
+                        !(v instanceof HTMLElement)
+                    )
+                );
+            }),
             videoMap: persistentMap
         }));
     }, 1000); // Debounce 1s
@@ -469,7 +479,7 @@ const App = () => {
       });
   };
 
-  const updateBox = (idx: 0 | 1, newBox: IncidentBox) => {
+  const updateBox = useCallback((idx: 0 | 1, newBox: IncidentBox) => {
       setJsonData(prev => {
           if (selectedItemIndex === -1) return prev;
           const newData = [...prev];
@@ -496,7 +506,7 @@ const App = () => {
           }
           return prev;
       });
-  };
+  }, [selectedItemIndex]);
 
   const downloadJson = () => {
       // Serialize back to string
@@ -1068,24 +1078,29 @@ const App = () => {
 const BoxOverlay = ({ activeKeyframe, boxData, onUpdate, onTogglePlay }: any) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [dragState, setDragState] = useState<{
-        mode: 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'draw';
+        mode: 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w' | 'draw';
         startX: number;
         startY: number;
         startBox: IncidentBox; // [t, ymin, xmin, ymax, xmax]
+        rect: DOMRect;
     } | null>(null);
 
     useEffect(() => {
         if (!dragState) return;
 
         const handleMove = (e: MouseEvent) => {
-            if (!containerRef.current) return;
-            const rect = containerRef.current.getBoundingClientRect();
+            const rect = dragState.rect;
             if (rect.width === 0 || rect.height === 0) return;
 
             // Common normalization logic
             const normalize = (val: number, dim: number) => (val / dim) * 1000;
             
             if (dragState.mode === 'draw') {
+                const dx = e.clientX - dragState.startX;
+                const dy = e.clientY - dragState.startY;
+                // Higher threshold to prevent accidental drawing when trying to click handles
+                if (Math.sqrt(dx*dx + dy*dy) < 15) return;
+
                 const startXRel = normalize(dragState.startX - rect.left, rect.width);
                 const startYRel = normalize(dragState.startY - rect.top, rect.height);
                 const currXRel = normalize(e.clientX - rect.left, rect.width);
@@ -1127,6 +1142,14 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate, onTogglePlay }: any) =>
                 nXmin += dx; nYmax += dy;
             } else if (dragState.mode === 'se') {
                 nXmax += dx; nYmax += dy;
+            } else if (dragState.mode === 'n') {
+                nYmin += dy;
+            } else if (dragState.mode === 's') {
+                nYmax += dy;
+            } else if (dragState.mode === 'w') {
+                nXmin += dx;
+            } else if (dragState.mode === 'e') {
+                nXmax += dx;
             }
 
             // Normalization & Clamping
@@ -1183,78 +1206,79 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate, onTogglePlay }: any) =>
     const color = activeKeyframe === 0 ? 'rgb(37, 99, 235)' : 'rgb(37, 99, 235)'; // Both blue in screenshot for loop
     const bg = 'rgba(37, 99, 235, 0.2)';
 
+    const Handle = ({ mode, cursor, className }: { mode: any, cursor: string, className: string }) => (
+        <div 
+            className={`absolute w-12 h-12 flex items-center justify-center z-30 pointer-events-auto group/handle ${className}`}
+            style={{ cursor }}
+            onMouseDown={(e) => {
+                e.stopPropagation();
+                if (!containerRef.current) return;
+                const rect = containerRef.current.getBoundingClientRect();
+                setDragState({ mode, startX: e.clientX, startY: e.clientY, startBox: [...boxData[activeKeyframe]] as IncidentBox, rect });
+            }}
+        >
+            {/* Visual hit area indicator on hover */}
+            <div className="absolute inset-0 rounded-full group-hover/handle:bg-blue-500/10 transition-colors pointer-events-none" />
+            <div 
+                className="w-3.5 h-3.5 bg-white border-2 rounded-full shadow-[0_2px_8px_rgba(0,0,0,0.3)] group-hover/handle:scale-125 group-hover/handle:border-blue-400 transition-all duration-150 z-10 relative"
+                style={{ borderColor: color }}
+            />
+        </div>
+    );
+
     return (
         <div 
             ref={containerRef} 
             className="absolute inset-0 z-20 cursor-crosshair"
             onMouseDown={(e) => {
                 // Start drawing
+                if (!containerRef.current) return;
+                const rect = containerRef.current.getBoundingClientRect();
                 setDragState({ 
                     mode: 'draw', 
                     startX: e.clientX, 
                     startY: e.clientY, 
-                    startBox: [...boxData[activeKeyframe]] as IncidentBox 
+                    startBox: [...boxData[activeKeyframe]] as IncidentBox,
+                    rect
                 });
             }}
         >
              {/* Only the box interacts, background passes through */}
              <div 
-                className="absolute border-2 pointer-events-auto cursor-move group touch-none shadow-[0_0_15px_rgba(37,99,235,0.5)]"
+                className="absolute border-2 pointer-events-auto cursor-move group touch-none shadow-[0_0_15px_rgba(37,99,235,0.5)] will-change-[top,left,width,height]"
                 style={{ ...style, borderColor: color, backgroundColor: bg }}
                 onMouseDown={(e) => {
                     e.stopPropagation();
-                    setDragState({ mode: 'move', startX: e.clientX, startY: e.clientY, startBox: [...boxData[activeKeyframe]] as IncidentBox });
+                    if (!containerRef.current) return;
+                    const rect = containerRef.current.getBoundingClientRect();
+                    setDragState({ mode: 'move', startX: e.clientX, startY: e.clientY, startBox: [...boxData[activeKeyframe]] as IncidentBox, rect });
                 }}
              >
                 {/* Label */}
                 <div 
-                    className="absolute -top-6 left-0 px-1.5 py-0.5 text-[10px] font-bold text-white rounded shadow-sm whitespace-nowrap"
+                    className="absolute -top-6 left-0 px-1.5 py-0.5 text-[10px] font-bold text-white rounded shadow-sm whitespace-nowrap pointer-events-none"
                     style={{ backgroundColor: color }}
                 >
                     {activeKeyframe === 0 ? "START" : "END"}
                 </div>
 
-                {/* Handles */}
-                {/* NW */}
-                <div 
-                    className="absolute -top-1.5 -left-1.5 w-4 h-4 bg-white border-2 rounded-full cursor-nw-resize shadow-sm hover:scale-110 transition-transform"
-                    style={{ borderColor: color }}
-                    onMouseDown={(e) => {
-                         e.stopPropagation();
-                         setDragState({ mode: 'nw', startX: e.clientX, startY: e.clientY, startBox: [...boxData[activeKeyframe]] as IncidentBox });
-                    }}
-                />
-                {/* NE */}
-                <div 
-                    className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-white border-2 rounded-full cursor-ne-resize shadow-sm hover:scale-110 transition-transform"
-                    style={{ borderColor: color }}
-                    onMouseDown={(e) => {
-                         e.stopPropagation();
-                         setDragState({ mode: 'ne', startX: e.clientX, startY: e.clientY, startBox: [...boxData[activeKeyframe]] as IncidentBox });
-                    }}
-                />
-                {/* SW */}
-                <div 
-                    className="absolute -bottom-1.5 -left-1.5 w-4 h-4 bg-white border-2 rounded-full cursor-sw-resize shadow-sm hover:scale-110 transition-transform"
-                    style={{ borderColor: color }}
-                    onMouseDown={(e) => {
-                         e.stopPropagation();
-                         setDragState({ mode: 'sw', startX: e.clientX, startY: e.clientY, startBox: [...boxData[activeKeyframe]] as IncidentBox });
-                    }}
-                />
-                {/* SE */}
-                <div 
-                    className="absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-white border-2 rounded-full cursor-se-resize shadow-sm hover:scale-110 transition-transform"
-                    style={{ borderColor: color }}
-                    onMouseDown={(e) => {
-                         e.stopPropagation();
-                         setDragState({ mode: 'se', startX: e.clientX, startY: e.clientY, startBox: [...boxData[activeKeyframe]] as IncidentBox });
-                    }}
-                />
+                {/* Corner Handles */}
+                <Handle mode="nw" cursor="nw-resize" className="-top-6 -left-6" />
+                <Handle mode="ne" cursor="ne-resize" className="-top-6 -right-6" />
+                <Handle mode="sw" cursor="sw-resize" className="-bottom-6 -left-6" />
+                <Handle mode="se" cursor="se-resize" className="-bottom-6 -right-6" />
+
+                {/* Edge Handles */}
+                <Handle mode="n" cursor="n-resize" className="-top-6 left-1/2 -translate-x-1/2" />
+                <Handle mode="s" cursor="s-resize" className="-bottom-6 left-1/2 -translate-x-1/2" />
+                <Handle mode="w" cursor="w-resize" className="top-1/2 -translate-y-1/2 -left-6" />
+                <Handle mode="e" cursor="e-resize" className="top-1/2 -translate-y-1/2 -right-6" />
              </div>
         </div>
     );
 };
 
-const root = createRoot(document.getElementById('root')!);
+const container = document.getElementById('root')!;
+const root = (window as any)._root || createRoot(container);
+(window as any)._root = root;
 root.render(<App />);
