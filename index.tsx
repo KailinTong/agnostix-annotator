@@ -742,32 +742,34 @@ const App = () => {
                <div className="flex-1 relative flex items-center justify-center overflow-hidden bg-black/50">
                    {videoUrl ? (
                        <div className="relative group max-h-full max-w-full flex items-center justify-center h-full">
-                           <video 
-                              ref={(el) => {
-                                  videoRef.current = el;
-                                  // Update state only if changed to avoid loops, though strict equality handles this.
-                                  if (el !== videoNode) setVideoNode(el);
-                              }}
-                              src={videoUrl} 
-                              // Drive videos might need controls to be manually forced if headers are strict
-                              crossOrigin={videoUrl.startsWith('http') ? "anonymous" : undefined}
-                              className="max-h-[calc(100vh-200px)] max-w-full shadow-lg"
-                              onClick={() => isPlaying ? videoRef.current?.pause() : videoRef.current?.play()}
-                              onPlay={() => setIsPlaying(true)}
-                              onPause={() => setIsPlaying(false)}
-                              // Handle errors for remote videos
-                              onError={(e) => console.log("Video Load Error", e)}
-                           />
-
-                           {/* Ensure BoxOverlay only renders when videoNode is ready */}
-                           {parsed && parsed.incident === 1 && parsed.box_2d.length === 2 && videoNode && (
-                               <BoxOverlay 
-                                  activeKeyframe={activeKeyframe}
-                                  boxData={parsed.box_2d}
-                                  onUpdate={updateBox}
-                                  onTogglePlay={() => isPlaying ? videoRef.current?.pause() : videoRef.current?.play()}
+                           <div className="relative">
+                               <video 
+                                  ref={(el) => {
+                                      videoRef.current = el;
+                                      // Update state only if changed to avoid loops, though strict equality handles this.
+                                      if (el !== videoNode) setVideoNode(el);
+                                  }}
+                                  src={videoUrl} 
+                                  // Drive videos might need controls to be manually forced if headers are strict
+                                  crossOrigin={videoUrl.startsWith('http') ? "anonymous" : undefined}
+                                  className="max-h-[calc(100vh-200px)] max-w-full shadow-lg block"
+                                  onClick={() => isPlaying ? videoRef.current?.pause() : videoRef.current?.play()}
+                                  onPlay={() => setIsPlaying(true)}
+                                  onPause={() => setIsPlaying(false)}
+                                  // Handle errors for remote videos
+                                  onError={(e) => console.log("Video Load Error", e)}
                                />
-                           )}
+
+                               {/* Ensure BoxOverlay only renders when videoNode is ready */}
+                               {parsed && parsed.incident === 1 && parsed.box_2d.length === 2 && videoNode && (
+                                   <BoxOverlay 
+                                      activeKeyframe={activeKeyframe}
+                                      boxData={parsed.box_2d}
+                                      onUpdate={updateBox}
+                                      onTogglePlay={() => isPlaying ? videoRef.current?.pause() : videoRef.current?.play()}
+                                   />
+                               )}
+                           </div>
                        </div>
                    ) : (
                        <div className="text-gray-600 flex flex-col items-center">
