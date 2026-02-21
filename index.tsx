@@ -185,7 +185,6 @@ const CoordControl: React.FC<CoordControlProps> = ({ label, value, onChange }) =
                     title="-20"
                 ><Minus className="w-3 h-3" /></button>
                 <input 
-                    key={value}
                     type="number" 
                     className="w-14 bg-gray-950 text-xs text-center outline-none font-mono py-1 appearance-none text-blue-200"
                     value={displayValue}
@@ -199,6 +198,33 @@ const CoordControl: React.FC<CoordControlProps> = ({ label, value, onChange }) =
             </div>
         </div>
     )
+}
+
+const TimeInput = ({ value, duration, onChange }: { value: number, duration: number, onChange: (v: number) => void }) => {
+    const [inputValue, setInputValue] = useState(value.toFixed(2));
+
+    useEffect(() => {
+        setInputValue(value.toFixed(2));
+    }, [value]);
+
+    return (
+        <input 
+            type="number"
+            step={0.01}
+            min={0}
+            max={duration}
+            className="w-full bg-transparent text-xs font-mono text-blue-200 p-1 text-center outline-none"
+            value={inputValue}
+            onChange={(e) => {
+                setInputValue(e.target.value);
+                const s = parseFloat(e.target.value);
+                if(!isNaN(s) && duration > 0) {
+                    onChange(s);
+                }
+            }}
+            onBlur={() => setInputValue(value.toFixed(2))}
+        />
+    );
 }
 
 // --- Main App Component ---
