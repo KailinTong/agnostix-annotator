@@ -83,24 +83,41 @@ The canonical dataset file is **`DENM_TUMTraffic_VideoQA_all.json`**. Each entry
 
 | Field | Type | Description |
 |---|---|---|
-| `id` | `string` | `"{base_id}_{segment_index}"` e.g. `"99002_001"`. The numeric suffix is the segment index. |
+| `id` | `string` | Entry identifier. Two formats exist — see below. |
 | `video` | `string` | Filename of the video clip to load. When `segment_index` is `null` this equals `original_video`. |
 | `original_video` | `string` | Filename of the full, unsegmented source video. |
 | `segment_index` | `integer \| null` | Which segment this entry covers. `null` means the entry covers the entire original video — `video` and `original_video` are the same file. |
-| `conversations` | `array` | Two-turn conversation: `human` prompt and `assistant` JSON annotation (see below). |
+| `conversations` | `array` | Two-turn conversation: `human` prompt and `assistant` annotation. The `assistant.value` may be an empty string `""` for entries that have not yet been annotated. |
 
-### Segmentation
+### ID formats
 
-A single source video is often split into multiple short clips, each becoming its own dataset entry:
+**Segmented** — one source video split into multiple clips, each with its own entry:
 
 ```
+id format:  "{base_id}_{segment_index}"
+
 original_video:  2021_04_08_11_31_accident_a9_s50_far.mp4
-  → segment 0:   2021_04_08_11_31_accident_a9_s50_far_segment_000.mp4  (id: "99002_000")
-  → segment 1:   2021_04_08_11_31_accident_a9_s50_far_segment_001.mp4  (id: "99002_001")
-  → segment 2:   2021_04_08_11_31_accident_a9_s50_far_segment_002.mp4  (id: "99002_002")
+  → id "99002_000"  video: ...segment_000.mp4   segment_index: 0
+  → id "99002_001"  video: ...segment_001.mp4   segment_index: 1
+  → id "99002_002"  video: ...segment_002.mp4   segment_index: 2
 ```
 
-When `segment_index` is `null`, there is only one entry for that source video and you upload the original file directly.
+**Unsegmented** — one entry per source video, `segment_index` is `null`, `video == original_video`:
+
+```json
+{
+  "id": "00000",
+  "video": "20220518_acci-bg1.mp4",
+  "original_video": "20220518_acci-bg1.mp4",
+  "segment_index": null,
+  "conversations": [
+    { "from": "human",     "value": "<image>\nAnalyze this traffic video..." },
+    { "from": "assistant", "value": "" }
+  ]
+}
+```
+
+An empty `assistant.value` (`""`) means the entry has not been annotated yet — the app will treat it as a blank annotation ready for editing.
 
 ### Annotation schema (`assistant.value`)
 
