@@ -117,7 +117,6 @@ original_video:  2021_04_08_11_31_accident_a9_s50_far.mp4
 }
 ```
 
-An empty `assistant.value` (`""`) means the entry has not been annotated yet — the app will treat it as a blank annotation ready for editing.
 
 ### Annotation schema (`assistant.value`)
 
