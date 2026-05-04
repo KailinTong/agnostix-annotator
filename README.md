@@ -5,7 +5,6 @@
 
 A browser-based tool for reviewing and correcting DENM (Decentralised Environmental Notification Message) annotations on traffic videos. Load a dataset JSON, upload the matching videos, and edit spatiotemporal bounding boxes and DENM metadata — all with auto-save to localStorage.
 
-**Live app:** https://agnostix-annotator-970133466889.us-west1.run.app
 
 </div>
 
