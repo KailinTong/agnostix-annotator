@@ -240,12 +240,14 @@ const App = () => {
   // Selection
   const [selectedItemIndex, setSelectedItemIndex] = useState<number>(-1);
   const [activeKeyframe, setActiveKeyframe] = useState<0 | 1>(0); // 0 = Start Frame, 1 = End Frame
+  const [sidebarSearch, setSidebarSearch] = useState('');
 
   // Player
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  
+  const [videoError, setVideoError] = useState<string | null>(null);
+
     const [videoNode, setVideoNode] = useState<HTMLVideoElement | null>(null);
     const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -586,25 +588,34 @@ const App = () => {
 
   // --- Video Logic ---
 
+  // Clear stale playback state when the user navigates to a different item.
+  // Kept separate so it never races with the videoNode remount below.
   useEffect(() => {
-    // Only bind if videoNode is available
+    setCurrentTime(0);
+    setDuration(0);
+    setVideoError(null);
+  }, [selectedItemIndex]);
+
+  // Bind/unbind native video events whenever the DOM element changes.
+  // Must NOT touch videoError here — the onError handler sets it after mount
+  // and clearing it here would wipe it before the user sees it.
+  useEffect(() => {
     if (!videoNode) return;
-    
+
     const ut = () => setCurrentTime(videoNode.currentTime);
     const ud = () => setDuration(videoNode.duration);
-    
+
     videoNode.addEventListener('timeupdate', ut);
     videoNode.addEventListener('loadedmetadata', ud);
-    
-    // Initial sync
+
     setCurrentTime(videoNode.currentTime);
     if (!isNaN(videoNode.duration)) setDuration(videoNode.duration);
 
-    return () => { 
-        videoNode.removeEventListener('timeupdate', ut); 
-        videoNode.removeEventListener('loadedmetadata', ud); 
+    return () => {
+        videoNode.removeEventListener('timeupdate', ut);
+        videoNode.removeEventListener('loadedmetadata', ud);
     };
-  }, [selectedItemIndex, videoNode]); // Depend on videoNode
+  }, [videoNode]);
 
   const seekTo = (t: number) => {
       if (videoNode) videoNode.currentTime = t;
@@ -760,15 +771,27 @@ const App = () => {
       <div className="flex-1 flex overflow-hidden">
           {/* List */}
           <aside className="w-64 bg-gray-900 border-r border-gray-800 flex flex-col shrink-0 z-10">
+              <div className="px-2 py-2 border-b border-gray-800 shrink-0">
+                  <input
+                      type="text"
+                      placeholder="Filter by filename…"
+                      value={sidebarSearch}
+                      onChange={e => setSidebarSearch(e.target.value)}
+                      className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 placeholder-gray-600 outline-none focus:border-blue-500"
+                  />
+              </div>
               <div className="flex-1 overflow-y-auto custom-scrollbar">
-                  {jsonData.map((it, i) => (
-                      <div key={it.id || i} 
-                           onClick={() => setSelectedItemIndex(i)}
-                           className={`px-4 py-3 border-b border-gray-800 cursor-pointer flex justify-between items-center transition-colors ${selectedItemIndex === i ? 'bg-blue-900/20 border-l-2 border-l-blue-500' : 'hover:bg-gray-800'}`}>
-                          <div className="truncate text-xs font-mono text-gray-400">{it.video}</div>
-                          {it._parsed?.situation === 1 && <AlertTriangle className="w-3 h-3 text-orange-500" />}
-                      </div>
-                  ))}
+                  {jsonData.map((it, i) => {
+                      if (sidebarSearch && !it.video?.toLowerCase().includes(sidebarSearch.toLowerCase())) return null;
+                      return (
+                          <div key={it.id || i}
+                               onClick={() => setSelectedItemIndex(i)}
+                               className={`px-4 py-3 border-b border-gray-800 cursor-pointer flex justify-between items-center transition-colors ${selectedItemIndex === i ? 'bg-blue-900/20 border-l-2 border-l-blue-500' : 'hover:bg-gray-800'}`}>
+                              <div className="text-xs font-mono text-gray-400 overflow-hidden whitespace-nowrap" title={it.video} style={{direction:'rtl', textOverflow:'ellipsis'}}>{it.video}</div>
+                              {it._parsed?.situation === 1 && <AlertTriangle className="w-3 h-3 text-orange-500" />}
+                          </div>
+                      );
+                  })}
               </div>
           </aside>
 
@@ -779,22 +802,38 @@ const App = () => {
                    {videoUrl ? (
                        <div className="relative group max-h-full max-w-full flex items-center justify-center h-full">
                            <div className="relative">
-                               <video 
+                               <video
+                                  key={videoUrl}
                                   ref={(el) => {
                                       videoRef.current = el;
-                                      // Update state only if changed to avoid loops, though strict equality handles this.
                                       if (el !== videoNode) setVideoNode(el);
                                   }}
-                                  src={videoUrl} 
-                                  // Drive videos might need controls to be manually forced if headers are strict
+                                  src={videoUrl}
                                   crossOrigin={videoUrl.startsWith('http') ? "anonymous" : undefined}
                                   className="max-h-[calc(100vh-200px)] max-w-full shadow-lg block"
                                   onClick={() => isPlaying ? videoRef.current?.pause() : videoRef.current?.play()}
                                   onPlay={() => setIsPlaying(true)}
                                   onPause={() => setIsPlaying(false)}
-                                  // Handle errors for remote videos
-                                  onError={(e) => console.log("Video Load Error", e)}
+                                  onError={(e) => {
+                                      const v = e.currentTarget;
+                                      const code = v.error?.code;
+                                      const msg: Record<number, string> = {
+                                          1: 'Load aborted',
+                                          2: 'Network error',
+                                          3: 'Decode error — file may be corrupted',
+                                          4: 'Unsupported format or codec',
+                                      };
+                                      setVideoError(msg[code ?? 0] ?? 'Unknown video error');
+                                  }}
                                />
+                               {videoError && (
+                                   <div className="absolute inset-0 flex items-center justify-center bg-black/70 z-30">
+                                       <div className="flex items-center gap-2 bg-red-900/80 border border-red-700 text-red-200 text-xs px-4 py-2 rounded-lg shadow">
+                                           <AlertCircle className="w-4 h-4 shrink-0" />
+                                           <span>{videoError}</span>
+                                       </div>
+                                   </div>
+                               )}
 
                                {/* Ensure BoxOverlay only renders when videoNode is ready */}
                                {parsed && parsed.situation === 1 && parsed.box_2d.length === 2 && videoNode && (
