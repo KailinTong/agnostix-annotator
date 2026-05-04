@@ -14,19 +14,19 @@ A browser-based tool for reviewing and correcting DENM (Decentralised Environmen
 
 ### 1. Load a dataset JSON
 
-Drag-and-drop (or click to browse) a JSON file in the format described below. The app parses each entry's assistant conversation and populates the annotation editor.
+Click **Select File** (or drag-and-drop onto the drop zone) to load a JSON file in the format described below. The app parses each entry's assistant conversation and populates the annotation editor.
 
 ### 2. Upload video files
 
-Drag-and-drop one or more video files onto the **Video Files** drop zone. The app matches each video to a dataset entry by filename — the filename must match the `video` field in the JSON (exact match or basename match for path strings).
+Click **Folder** to upload an entire directory of videos at once, or **Files** to pick individual files. The app matches each video to a dataset entry by filename — the filename must match the `video` field in the JSON (exact match or basename match for path strings).
 
 > **Codec note:** Use **H.264 / AAC** MP4 files. H.265/HEVC is not supported in all browsers. If a video fails to load, a red error badge will appear explaining why (e.g. "Unsupported format or codec").
 
-You can upload all your video files at once by dragging a folder. Any previously uploaded videos are remembered within the same browser session (blob URLs are not persisted across page reloads, so re-upload after a refresh).
+Video files are remembered within the same browser session (blob URLs are not persisted across page reloads, so re-upload after a refresh).
 
-### 3. Start the workspace
+### 3. Start verifying
 
-Click **Start Annotating**. The left panel lists all dataset entries. Click any entry to open it.
+Click **Start Verifying**. The left panel lists all dataset entries. Click any entry to open it.
 
 ### 4. Review and edit annotations
 
