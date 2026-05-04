@@ -58,14 +58,14 @@ Click **Export** (top-right) to download the annotated dataset as a JSON file. T
 
 ## JSON Format
 
-Each entry in the dataset array must follow this structure:
+The canonical dataset file is **`DENM_TUMTraffic_VideoQA_all.json`**. Each entry has this structure:
 
 ```json
 {
-  "id": 99000,
-  "video": "my_video.mp4",
-  "type": "accident - unsecured accident",
-  "sample_id": "my_video_hazard_0000",
+  "id": "99002_001",
+  "video": "2021_04_08_11_31_accident_a9_s50_far_segment_001.mp4",
+  "original_video": "2021_04_08_11_31_accident_a9_s50_far.mp4",
+  "segment_index": 1,
   "conversations": [
     {
       "from": "human",
@@ -79,18 +79,43 @@ Each entry in the dataset array must follow this structure:
 }
 ```
 
-The `assistant.value` field is a JSON string with these keys:
+### Top-level fields
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `string` | `"{base_id}_{segment_index}"` e.g. `"99002_001"`. The numeric suffix is the segment index. |
+| `video` | `string` | Filename of the video clip to load. When `segment_index` is `null` this equals `original_video`. |
+| `original_video` | `string` | Filename of the full, unsegmented source video. |
+| `segment_index` | `integer \| null` | Which segment this entry covers. `null` means the entry covers the entire original video — `video` and `original_video` are the same file. |
+| `conversations` | `array` | Two-turn conversation: `human` prompt and `assistant` JSON annotation (see below). |
+
+### Segmentation
+
+A single source video is often split into multiple short clips, each becoming its own dataset entry:
+
+```
+original_video:  2021_04_08_11_31_accident_a9_s50_far.mp4
+  → segment 0:   2021_04_08_11_31_accident_a9_s50_far_segment_000.mp4  (id: "99002_000")
+  → segment 1:   2021_04_08_11_31_accident_a9_s50_far_segment_001.mp4  (id: "99002_001")
+  → segment 2:   2021_04_08_11_31_accident_a9_s50_far_segment_002.mp4  (id: "99002_002")
+```
+
+When `segment_index` is `null`, there is only one entry for that source video and you upload the original file directly.
+
+### Annotation schema (`assistant.value`)
+
+The `assistant.value` field is a JSON string:
 
 | Key | Type | Description |
 |---|---|---|
 | `situation` | `0` or `1` | Whether a traffic hazard is present |
 | `message_type` | `"DENM"` or `"none"` | Must match `situation` |
-| `cause_code` | `integer` or `null` | DENM cause code |
-| `sub_cause_code` | `integer` or `null` | DENM sub-cause code |
-| `cause_text` | `string` or `null` | Human-readable cause label |
-| `sub_cause_text` | `string` or `null` | Human-readable sub-cause label |
-| `box_2d` | `[[t,ymin,xmin,ymax,xmax], [...]]` | Two keyframe boxes, or `[]` if situation=0 |
-| `description` | `string` | Scene description |
+| `cause_code` | `integer \| null` | DENM cause code |
+| `sub_cause_code` | `integer \| null` | DENM sub-cause code |
+| `cause_text` | `string \| null` | Human-readable cause label |
+| `sub_cause_text` | `string \| null` | Human-readable sub-cause label |
+| `box_2d` | `[[t,ymin,xmin,ymax,xmax], [...]]` | Two keyframe boxes, or `[]` if `situation=0` |
+| `description` | `string` | Free-text scene description |
 
 **Box coordinates:** `t` is normalized time (0–1 over video duration); `ymin/xmin/ymax/xmax` are integers 0–1000 with `(0,0)` at top-left.
 
