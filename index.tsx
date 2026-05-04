@@ -117,16 +117,16 @@ const DENM_MAPPING: any = {
 // --- Types ---
 
 // [t, ymin, xmin, ymax, xmax] - Normalized t 0-1, coords 0-1000
-type IncidentBox = [number, number, number, number, number];
+type SituationBox = [number, number, number, number, number];
 
-interface IncidentData {
-  incident: number; // 0 or 1
+interface SituationData {
+  situation: number; // 0 or 1
   message_type: "DENM" | "none";
   cause_code: number | null;
   sub_cause_code: number | null;
   cause_text: string | null;
   sub_cause_text: string | null;
-  box_2d: IncidentBox[]; // Array of exactly 2 arrays if incident=1
+  box_2d: SituationBox[]; // Array of exactly 2 arrays if situation=1
   description: string;
 }
 
@@ -134,7 +134,7 @@ interface DatasetItem {
   id: number;
   video: string;
   conversations: { from: string; value: string }[];
-  _parsed?: IncidentData; // Internal field for editing
+  _parsed?: SituationData; // Internal field for editing
   [key: string]: any;
 }
 
@@ -328,7 +328,7 @@ const App = () => {
                     console.error("Inner JSON parse error", e);
                     // Fallback default
                     item._parsed = {
-                        incident: 0, message_type: 'none', 
+                        situation: 0, message_type: 'none', 
                         cause_code: null, sub_cause_code: null, 
                         cause_text: null, sub_cause_text: null, 
                         box_2d: [], description: ""
@@ -336,7 +336,7 @@ const App = () => {
                 }
             } else {
                  item._parsed = {
-                        incident: 0, message_type: 'none', 
+                        situation: 0, message_type: 'none', 
                         cause_code: null, sub_cause_code: null, 
                         cause_text: null, sub_cause_text: null, 
                         box_2d: [], description: ""
@@ -384,11 +384,11 @@ const App = () => {
               id: i,
               video: fname as string,
               conversations: [
-                  { from: "human", value: `<video>\nAnalyze the traffic situation.` },
+                  { from: "human", value: `<image>\nAnalyze the traffic situation.` },
                   { from: "assistant", value: "" } // Will be filled on export
               ],
               _parsed: {
-                  incident: 0, 
+                  situation: 0, 
                   message_type: "none", 
                   cause_code: null, 
                   sub_cause_code: null, 
@@ -414,7 +414,7 @@ const App = () => {
       });
   };
 
-  const updateField = (key: keyof IncidentData, value: any) => {
+  const updateField = (key: keyof SituationData, value: any) => {
       setJsonData(prev => {
           if (selectedItemIndex === -1) return prev;
           const newData = [...prev];
@@ -429,7 +429,7 @@ const App = () => {
           (parsed as any)[key] = value;
 
           // Auto-logic for DENM compliance
-          if (key === 'incident') {
+          if (key === 'situation') {
               if (value === 1) {
                   parsed.message_type = "DENM";
                   // Initialize box if empty
@@ -461,7 +461,7 @@ const App = () => {
           }
 
           if (key === 'sub_cause_code') {
-               if (value === null || value === 0) {
+               if (value === null) {
                    parsed.sub_cause_code = null;
                    parsed.sub_cause_text = null;
                } else {
@@ -479,7 +479,7 @@ const App = () => {
       });
   };
 
-  const updateBox = useCallback((idx: 0 | 1, newBox: IncidentBox) => {
+  const updateBox = useCallback((idx: 0 | 1, newBox: SituationBox) => {
       setJsonData(prev => {
           if (selectedItemIndex === -1) return prev;
           const newData = [...prev];
@@ -488,11 +488,11 @@ const App = () => {
 
           const parsed = { ...item._parsed };
           // Deep copy the box_2d array to avoid mutation
-          parsed.box_2d = parsed.box_2d.map(box => [...box]) as IncidentBox[];
+          parsed.box_2d = parsed.box_2d.map(box => [...box]) as SituationBox[];
           
-          if (parsed.incident === 1 && parsed.box_2d.length === 2) {
+          if (parsed.situation === 1 && parsed.box_2d.length === 2) {
                // Clamp AND Round values for schema compliance (integers 0-1000)
-              const clamped: IncidentBox = [
+              const clamped: SituationBox = [
                  newBox[0], // time stays float
                  Math.round(Math.max(0, Math.min(1000, newBox[1]))),
                  Math.round(Math.max(0, Math.min(1000, newBox[2]))),
@@ -514,19 +514,19 @@ const App = () => {
           const newItem = { ...item };
           
           const { 
-              incident, message_type, cause_code, sub_cause_code, 
+              situation, message_type, cause_code, sub_cause_code, 
               cause_text, sub_cause_text, box_2d, description 
           } = newItem._parsed || {};
           
           // Ensure correct schema typing for NULLs
-          const cleanParsed: IncidentData = {
-              incident: incident || 0, 
-              message_type: incident === 1 ? "DENM" : "none", 
-              cause_code: incident === 1 ? (cause_code || null) : null, 
-              sub_cause_code: incident === 1 ? (sub_cause_code || null) : null,
-              cause_text: incident === 1 ? (cause_text || null) : null, 
-              sub_cause_text: incident === 1 ? (sub_cause_text || null) : null, 
-              box_2d: incident === 1 ? (box_2d || []) : [], 
+          const cleanParsed: SituationData = {
+              situation: situation || 0, 
+              message_type: situation === 1 ? "DENM" : "none", 
+              cause_code: situation === 1 ? (cause_code || null) : null, 
+              sub_cause_code: situation === 1 ? (sub_cause_code || null) : null,
+              cause_text: situation === 1 ? (cause_text || null) : null, 
+              sub_cause_text: situation === 1 ? (sub_cause_text || null) : null, 
+              box_2d: situation === 1 ? (box_2d || []) : [], 
               description: description || ""
           };
 
@@ -535,7 +535,7 @@ const App = () => {
           // Update/Create Assistant Message
           if (!newItem.conversations || newItem.conversations.length === 0) {
               newItem.conversations = [
-                  { from: "human", value: `<video>\nAnalyze the road scene frame(s) from the given traffic video and output a STRICT JSON object with ONLY these keys:\n- "incident": 1 if a real traffic incident/hazard is visible in the video, else 0.\n- "message_type": "DENM" if incident=1, else "none".\n- "cause_code": integer if incident=1, else null.\n- "sub_cause_code": integer if incident=1, else null.\n- "cause_text": string if incident=1, else null.\n- "sub_cause_text": string if incident=1, else null.\n- "box_2d": if incident=1, provide TWO spatiotemporal boxes for the main hazardous object:\n    [t_0, ymin_0, xmin_0, ymax_0, xmax_0],\n    [t_1, ymin_1, xmin_1, ymax_1, xmax_1]\n  where t is normalized 0–1 and coordinates are normalized to 0–1000 with (0,0) at top-left.\n  If incident=0, box_2d must be [].\n- "description": short factual description of the scene and the hazard (if any).\n\nRules:\n- Output JSON only (no extra text, no extra keys).\n- If incident=1 → message_type MUST be "DENM", box_2d MUST contain exactly 2 entries, and the code/text MUST match the snippet above exactly.\n- If incident=0 → message_type MUST be "none\", all code/text fields MUST be null, and box_2d MUST be [].\n` },
+                  { from: "human", value: `<image>\nAnalyze the road scene frame(s) from the given traffic video and output a STRICT JSON object with ONLY these keys:\n- "situation": 1 if a real traffic situation/hazard is visible in the video, else 0.\n- "message_type": "DENM" if situation=1, else "none".\n- "cause_code": integer if situation=1, else null.\n- "sub_cause_code": integer if situation=1, else null.\n- "cause_text": string if situation=1, else null.\n- "sub_cause_text": string if situation=1, else null.\n- "box_2d": if situation=1, provide TWO spatiotemporal boxes for the main hazardous object:\n    [t_0, ymin_0, xmin_0, ymax_0, xmax_0],\n    [t_1, ymin_1, xmin_1, ymax_1, xmax_1]\n  where t is normalized 0-1 and coordinates are normalized to 0-1000 with (0,0) at top-left.\n  If situation=0, box_2d must be [].\n- "description": short factual description of the scene and the hazard (if any).\n\nRules:\n- Output JSON only (no extra text, no extra keys).\n- If situation=1 -> message_type MUST be "DENM", box_2d MUST contain exactly 2 entries.\n- If situation=0 -> message_type MUST be "none", all code/text fields MUST be null, and box_2d MUST be [].` },
                   { from: "assistant", value: jsonStr }
               ];
           } else {
@@ -552,7 +552,7 @@ const App = () => {
           }
           
           // Update root 'type' field based on cause text
-          if (cleanParsed.incident === 1 && cleanParsed.cause_text) {
+          if (cleanParsed.situation === 1 && cleanParsed.cause_text) {
               // Format: "accident - unsecured accident" (lowercase preferred based on examples)
               const cText = cleanParsed.cause_text.toLowerCase();
               const sText = cleanParsed.sub_cause_text ? cleanParsed.sub_cause_text.toLowerCase() : "";
@@ -735,7 +735,7 @@ const App = () => {
 
   // Compute Type Display
   let typeDisplay = "none";
-  if (parsed?.incident === 1 && parsed.cause_text) {
+  if (parsed?.situation === 1 && parsed.cause_text) {
       typeDisplay = parsed.cause_text;
       if (parsed.sub_cause_text) typeDisplay += ` - ${parsed.sub_cause_text}`;
   }
@@ -766,7 +766,7 @@ const App = () => {
                            onClick={() => setSelectedItemIndex(i)}
                            className={`px-4 py-3 border-b border-gray-800 cursor-pointer flex justify-between items-center transition-colors ${selectedItemIndex === i ? 'bg-blue-900/20 border-l-2 border-l-blue-500' : 'hover:bg-gray-800'}`}>
                           <div className="truncate text-xs font-mono text-gray-400">{it.video}</div>
-                          {it._parsed?.incident === 1 && <AlertTriangle className="w-3 h-3 text-orange-500" />}
+                          {it._parsed?.situation === 1 && <AlertTriangle className="w-3 h-3 text-orange-500" />}
                       </div>
                   ))}
               </div>
@@ -797,7 +797,7 @@ const App = () => {
                                />
 
                                {/* Ensure BoxOverlay only renders when videoNode is ready */}
-                               {parsed && parsed.incident === 1 && parsed.box_2d.length === 2 && videoNode && (
+                               {parsed && parsed.situation === 1 && parsed.box_2d.length === 2 && videoNode && (
                                    <BoxOverlay 
                                       activeKeyframe={activeKeyframe}
                                       boxData={parsed.box_2d}
@@ -834,7 +834,7 @@ const App = () => {
                   </div>
                   
                   {/* Spatiotemporal Editor Row */}
-                  {parsed && parsed.incident === 1 && parsed.box_2d.length === 2 ? (
+                  {parsed && parsed.situation === 1 && parsed.box_2d.length === 2 ? (
                       <div className="flex items-center gap-6 px-4 py-3 overflow-x-auto">
                           <div className="flex flex-col gap-0.5 min-w-max">
                               <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider leading-none">Keyframe</span>
@@ -874,7 +874,7 @@ const App = () => {
                                         const s = parseFloat(e.target.value);
                                         if(!isNaN(s) && duration > 0) {
                                              const old = parsed.box_2d[activeKeyframe];
-                                             const newBox: IncidentBox = [s / duration, old[1], old[2], old[3], old[4]];
+                                             const newBox: SituationBox = [s / duration, old[1], old[2], old[3], old[4]];
                                              updateBox(activeKeyframe, newBox);
                                         }
                                     }}
@@ -894,7 +894,7 @@ const App = () => {
                                         label={labels[idx-1]}
                                         value={parsed.box_2d[activeKeyframe][idx] as number}
                                         onChange={(v) => {
-                                            const newBox = [...parsed.box_2d[activeKeyframe]] as IncidentBox;
+                                            const newBox = [...parsed.box_2d[activeKeyframe]] as SituationBox;
                                             newBox[idx] = v;
                                             updateBox(activeKeyframe, newBox);
                                         }}
@@ -917,7 +917,7 @@ const App = () => {
                       </div>
                   ) : (
                       <div className="flex items-center justify-center p-4 text-xs text-gray-500 gap-2 h-[88px]">
-                          <Info className="w-4 h-4" /> Enable "Incident" in the sidebar to access the Spatiotemporal Editor.
+                          <Info className="w-4 h-4" /> Enable "Situation" in the sidebar to access the Spatiotemporal Editor.
                       </div>
                   )}
                </div>
@@ -980,18 +980,18 @@ const App = () => {
                       
                       <div className="h-px bg-gray-800" />
                       
-                      {/* Incident Toggle */}
+                      {/* Situation Toggle */}
                       <div className="flex items-center justify-between p-4 bg-gray-800/30 rounded-xl border border-gray-700/50">
-                          <span className="text-sm font-bold text-gray-200">Traffic Incident?</span>
+                          <span className="text-sm font-bold text-gray-200">Traffic Situation?</span>
                           <div className="flex bg-gray-950 rounded-lg p-1 border border-gray-800">
                               <button 
-                                onClick={() => updateField('incident', 0)}
-                                className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${parsed.incident === 0 ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-500 hover:text-gray-300'}`}>
+                                onClick={() => updateField('situation', 0)}
+                                className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${parsed.situation === 0 ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-500 hover:text-gray-300'}`}>
                                 NO
                               </button>
                               <button 
-                                onClick={() => updateField('incident', 1)}
-                                className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${parsed.incident === 1 ? 'bg-red-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-300'}`}>
+                                onClick={() => updateField('situation', 1)}
+                                className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${parsed.situation === 1 ? 'bg-red-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-300'}`}>
                                 YES
                               </button>
                           </div>
@@ -1007,14 +1007,14 @@ const App = () => {
                            />
                       </div>
 
-                      {parsed.incident === 1 && (
+                      {parsed.situation === 1 && (
                           <>
                               {/* Cause Code */}
                               <div className="space-y-2">
                                   <label className="text-xs font-bold text-gray-500 uppercase">Cause Code</label>
                                   <select 
                                       className="w-full bg-gray-950 border border-gray-700 text-sm text-white rounded-md p-2.5 focus:border-blue-500 outline-none"
-                                      value={parsed.cause_code || ""}
+                                      value={parsed.cause_code ?? ""}
                                       onChange={e => {
                                           const v = e.target.value;
                                           updateField('cause_code', v === "" ? null : Number(v));
@@ -1032,7 +1032,7 @@ const App = () => {
                                   <label className="text-xs font-bold text-gray-500 uppercase">Sub Cause Code</label>
                                   <select 
                                       className="w-full bg-gray-950 border border-gray-700 text-sm text-white rounded-md p-2.5 focus:border-blue-500 outline-none"
-                                      value={parsed.sub_cause_code || ""}
+                                      value={parsed.sub_cause_code ?? ""}
                                       onChange={e => {
                                           const v = e.target.value;
                                           updateField('sub_cause_code', v === "" ? null : Number(v));
@@ -1081,7 +1081,7 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate, onTogglePlay }: any) =>
         mode: 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w' | 'draw';
         startX: number;
         startY: number;
-        startBox: IncidentBox; // [t, ymin, xmin, ymax, xmax]
+        startBox: SituationBox; // [t, ymin, xmin, ymax, xmax]
         rect: DOMRect;
     } | null>(null);
 
@@ -1111,7 +1111,7 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate, onTogglePlay }: any) =>
                 const nYmin = Math.min(startYRel, currYRel);
                 const nYmax = Math.max(startYRel, currYRel);
 
-                const clampedBox: IncidentBox = [
+                const clampedBox: SituationBox = [
                     dragState.startBox[0], // Keep time
                     Math.max(0, Math.min(1000, nYmin)),
                     Math.max(0, Math.min(1000, nXmin)),
@@ -1158,7 +1158,7 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate, onTogglePlay }: any) =>
             const finalYmin = Math.min(nYmin, nYmax);
             const finalYmax = Math.max(nYmin, nYmax);
 
-            const clampedBox: IncidentBox = [
+            const clampedBox: SituationBox = [
                 t,
                 Math.max(0, Math.min(1000, finalYmin)),
                 Math.max(0, Math.min(1000, finalXmin)),
@@ -1214,7 +1214,7 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate, onTogglePlay }: any) =>
                 e.stopPropagation();
                 if (!containerRef.current) return;
                 const rect = containerRef.current.getBoundingClientRect();
-                setDragState({ mode, startX: e.clientX, startY: e.clientY, startBox: [...boxData[activeKeyframe]] as IncidentBox, rect });
+                setDragState({ mode, startX: e.clientX, startY: e.clientY, startBox: [...boxData[activeKeyframe]] as SituationBox, rect });
             }}
         >
             {/* Visual hit area indicator on hover */}
@@ -1238,7 +1238,7 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate, onTogglePlay }: any) =>
                     mode: 'draw', 
                     startX: e.clientX, 
                     startY: e.clientY, 
-                    startBox: [...boxData[activeKeyframe]] as IncidentBox,
+                    startBox: [...boxData[activeKeyframe]] as SituationBox,
                     rect
                 });
             }}
@@ -1251,7 +1251,7 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate, onTogglePlay }: any) =>
                     e.stopPropagation();
                     if (!containerRef.current) return;
                     const rect = containerRef.current.getBoundingClientRect();
-                    setDragState({ mode: 'move', startX: e.clientX, startY: e.clientY, startBox: [...boxData[activeKeyframe]] as IncidentBox, rect });
+                    setDragState({ mode: 'move', startX: e.clientX, startY: e.clientY, startBox: [...boxData[activeKeyframe]] as SituationBox, rect });
                 }}
              >
                 {/* Label */}
