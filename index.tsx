@@ -1136,119 +1136,7 @@ const App = () => {
 
 const BoxOverlay = ({ activeKeyframe, boxData, onUpdate, onTogglePlay }: any) => {
     const containerRef = useRef<HTMLDivElement>(null);
-    const [dragState, setDragState] = useState<{
-        mode: 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w' | 'draw';
-        startX: number;
-        startY: number;
-        startBox: SituationBox; // [t, ymin, xmin, ymax, xmax]
-        rect: DOMRect;
-    } | null>(null);
-
-    useEffect(() => {
-        if (!dragState) return;
-
-        const handleMove = (e: MouseEvent) => {
-            const rect = dragState.rect;
-            if (rect.width === 0 || rect.height === 0) return;
-
-            // Common normalization logic
-            const normalize = (val: number, dim: number) => (val / dim) * 1000;
-            
-            if (dragState.mode === 'draw') {
-                const dx = e.clientX - dragState.startX;
-                const dy = e.clientY - dragState.startY;
-                // Higher threshold to prevent accidental drawing when trying to click handles
-                if (Math.sqrt(dx*dx + dy*dy) < 15) return;
-
-                const startXRel = normalize(dragState.startX - rect.left, rect.width);
-                const startYRel = normalize(dragState.startY - rect.top, rect.height);
-                const currXRel = normalize(e.clientX - rect.left, rect.width);
-                const currYRel = normalize(e.clientY - rect.top, rect.height);
-
-                const nXmin = Math.min(startXRel, currXRel);
-                const nXmax = Math.max(startXRel, currXRel);
-                const nYmin = Math.min(startYRel, currYRel);
-                const nYmax = Math.max(startYRel, currYRel);
-
-                const clampedBox: SituationBox = [
-                    dragState.startBox[0], // Keep time
-                    Math.max(0, Math.min(1000, nYmin)),
-                    Math.max(0, Math.min(1000, nXmin)),
-                    Math.max(0, Math.min(1000, nYmax)),
-                    Math.max(0, Math.min(1000, nXmax))
-                ];
-                onUpdate(activeKeyframe, clampedBox);
-                return;
-            }
-
-            const dxPx = e.clientX - dragState.startX;
-            const dyPx = e.clientY - dragState.startY;
-
-            const dx = (dxPx / rect.width) * 1000;
-            const dy = (dyPx / rect.height) * 1000;
-
-            const [t, sYmin, sXmin, sYmax, sXmax] = dragState.startBox;
-            let nYmin = sYmin, nXmin = sXmin, nYmax = sYmax, nXmax = sXmax;
-
-            // Logic matching the mode
-            if (dragState.mode === 'move') {
-                nXmin += dx; nXmax += dx; nYmin += dy; nYmax += dy;
-            } else if (dragState.mode === 'nw') {
-                nXmin += dx; nYmin += dy;
-            } else if (dragState.mode === 'ne') {
-                nXmax += dx; nYmin += dy;
-            } else if (dragState.mode === 'sw') {
-                nXmin += dx; nYmax += dy;
-            } else if (dragState.mode === 'se') {
-                nXmax += dx; nYmax += dy;
-            } else if (dragState.mode === 'n') {
-                nYmin += dy;
-            } else if (dragState.mode === 's') {
-                nYmax += dy;
-            } else if (dragState.mode === 'w') {
-                nXmin += dx;
-            } else if (dragState.mode === 'e') {
-                nXmax += dx;
-            }
-
-            // Normalization & Clamping
-            const finalXmin = Math.min(nXmin, nXmax);
-            const finalXmax = Math.max(nXmin, nXmax);
-            const finalYmin = Math.min(nYmin, nYmax);
-            const finalYmax = Math.max(nYmin, nYmax);
-
-            const clampedBox: SituationBox = [
-                t,
-                Math.max(0, Math.min(1000, finalYmin)),
-                Math.max(0, Math.min(1000, finalXmin)),
-                Math.max(0, Math.min(1000, finalYmax)),
-                Math.max(0, Math.min(1000, finalXmax))
-            ];
-            
-            onUpdate(activeKeyframe, clampedBox);
-        };
-
-        const handleUp = (e: MouseEvent) => {
-            if (dragState.mode === 'draw') {
-                const dist = Math.sqrt(
-                    Math.pow(e.clientX - dragState.startX, 2) + 
-                    Math.pow(e.clientY - dragState.startY, 2)
-                );
-                // If moved less than 5px, treat as click
-                if (dist < 5 && onTogglePlay) {
-                    onTogglePlay();
-                }
-            }
-            setDragState(null);
-        };
-
-        window.addEventListener('mousemove', handleMove);
-        window.addEventListener('mouseup', handleUp);
-        return () => {
-            window.removeEventListener('mousemove', handleMove);
-            window.removeEventListener('mouseup', handleUp);
-        };
-    }, [dragState, activeKeyframe, onUpdate, onTogglePlay]);
+    type DragMode = 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w' | 'draw';
 
     if (!boxData || !boxData[activeKeyframe]) return null;
 
@@ -1265,53 +1153,152 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate, onTogglePlay }: any) =>
     const color = activeKeyframe === 0 ? 'rgb(37, 99, 235)' : 'rgb(37, 99, 235)'; // Both blue in screenshot for loop
     const bg = 'rgba(37, 99, 235, 0.2)';
 
+    const startDrag = (e: React.PointerEvent, mode: DragMode) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!containerRef.current) return;
+
+        const rect = containerRef.current.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return;
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const startBox = [...boxData[activeKeyframe]] as SituationBox;
+        const normalize = (val: number, dim: number) => (val / dim) * 1000;
+
+        const updateFromPointer = (clientX: number, clientY: number) => {
+            if (mode === 'draw') {
+                const dx = clientX - startX;
+                const dy = clientY - startY;
+                if (Math.sqrt(dx * dx + dy * dy) < 3) return;
+
+                const startXRel = normalize(startX - rect.left, rect.width);
+                const startYRel = normalize(startY - rect.top, rect.height);
+                const currXRel = normalize(clientX - rect.left, rect.width);
+                const currYRel = normalize(clientY - rect.top, rect.height);
+
+                onUpdate(activeKeyframe, [
+                    startBox[0],
+                    Math.max(0, Math.min(1000, Math.min(startYRel, currYRel))),
+                    Math.max(0, Math.min(1000, Math.min(startXRel, currXRel))),
+                    Math.max(0, Math.min(1000, Math.max(startYRel, currYRel))),
+                    Math.max(0, Math.min(1000, Math.max(startXRel, currXRel)))
+                ]);
+                return;
+            }
+
+            const dx = ((clientX - startX) / rect.width) * 1000;
+            const dy = ((clientY - startY) / rect.height) * 1000;
+            const [t, sYmin, sXmin, sYmax, sXmax] = startBox;
+            let nYmin = sYmin;
+            let nXmin = sXmin;
+            let nYmax = sYmax;
+            let nXmax = sXmax;
+
+            if (mode === 'move') {
+                nXmin += dx; nXmax += dx; nYmin += dy; nYmax += dy;
+            } else if (mode === 'nw') {
+                nXmin += dx; nYmin += dy;
+            } else if (mode === 'ne') {
+                nXmax += dx; nYmin += dy;
+            } else if (mode === 'sw') {
+                nXmin += dx; nYmax += dy;
+            } else if (mode === 'se') {
+                nXmax += dx; nYmax += dy;
+            } else if (mode === 'n') {
+                nYmin += dy;
+            } else if (mode === 's') {
+                nYmax += dy;
+            } else if (mode === 'w') {
+                nXmin += dx;
+            } else if (mode === 'e') {
+                nXmax += dx;
+            }
+
+            const finalXmin = Math.min(nXmin, nXmax);
+            const finalXmax = Math.max(nXmin, nXmax);
+            const finalYmin = Math.min(nYmin, nYmax);
+            const finalYmax = Math.max(nYmin, nYmax);
+
+            onUpdate(activeKeyframe, [
+                t,
+                Math.max(0, Math.min(1000, finalYmin)),
+                Math.max(0, Math.min(1000, finalXmin)),
+                Math.max(0, Math.min(1000, finalYmax)),
+                Math.max(0, Math.min(1000, finalXmax))
+            ]);
+        };
+
+        const handleMove = (ev: PointerEvent) => {
+            ev.preventDefault();
+            updateFromPointer(ev.clientX, ev.clientY);
+        };
+
+        const handleUp = (ev: PointerEvent) => {
+            ev.preventDefault();
+            window.removeEventListener('pointermove', handleMove);
+            window.removeEventListener('pointerup', handleUp);
+            window.removeEventListener('pointercancel', handleUp);
+            document.body.style.userSelect = '';
+
+            if (mode === 'draw') {
+                const dx = ev.clientX - startX;
+                const dy = ev.clientY - startY;
+                if (Math.sqrt(dx * dx + dy * dy) < 3 && onTogglePlay) {
+                    onTogglePlay();
+                }
+            }
+        };
+
+        try {
+            e.currentTarget.setPointerCapture(e.pointerId);
+        } catch {
+            // The window-level pointer listeners still keep the drag alive.
+        }
+
+        document.body.style.userSelect = 'none';
+        window.addEventListener('pointermove', handleMove);
+        window.addEventListener('pointerup', handleUp);
+        window.addEventListener('pointercancel', handleUp);
+    };
+
     const Handle = ({ mode, cursor, className }: { mode: any, cursor: string, className: string }) => (
         <div 
-            className={`absolute w-12 h-12 flex items-center justify-center z-30 pointer-events-auto group/handle ${className}`}
+            className={`absolute w-14 h-14 flex items-center justify-center z-40 pointer-events-auto touch-none group/handle ${className}`}
             style={{ cursor }}
-            onMouseDown={(e) => {
-                e.stopPropagation();
-                if (!containerRef.current) return;
-                const rect = containerRef.current.getBoundingClientRect();
-                setDragState({ mode, startX: e.clientX, startY: e.clientY, startBox: [...boxData[activeKeyframe]] as SituationBox, rect });
-            }}
+            onPointerDown={(e) => startDrag(e, mode)}
+            title="Drag to resize"
         >
             {/* Visual hit area indicator on hover */}
             <div className="absolute inset-0 rounded-full group-hover/handle:bg-blue-500/10 transition-colors pointer-events-none" />
             <div 
-                className="w-3.5 h-3.5 bg-white border-2 rounded-full shadow-[0_2px_8px_rgba(0,0,0,0.3)] group-hover/handle:scale-125 group-hover/handle:border-blue-400 transition-all duration-150 z-10 relative"
+                className="w-4 h-4 bg-white border-2 rounded-full shadow-[0_2px_8px_rgba(0,0,0,0.3)] group-hover/handle:scale-125 group-hover/handle:border-blue-400 transition-all duration-150 z-10 relative"
                 style={{ borderColor: color }}
             />
         </div>
     );
 
+    const EdgeZone = ({ mode, cursor, className }: { mode: DragMode, cursor: string, className: string }) => (
+        <div
+            className={`absolute z-30 pointer-events-auto touch-none ${className}`}
+            style={{ cursor }}
+            onPointerDown={(e) => startDrag(e, mode)}
+            title="Drag to resize"
+        />
+    );
+
     return (
         <div 
             ref={containerRef} 
-            className="absolute inset-0 z-20 cursor-crosshair"
-            onMouseDown={(e) => {
-                // Start drawing
-                if (!containerRef.current) return;
-                const rect = containerRef.current.getBoundingClientRect();
-                setDragState({ 
-                    mode: 'draw', 
-                    startX: e.clientX, 
-                    startY: e.clientY, 
-                    startBox: [...boxData[activeKeyframe]] as SituationBox,
-                    rect
-                });
-            }}
+            className="absolute inset-0 z-20 cursor-crosshair touch-none select-none"
+            onPointerDown={(e) => startDrag(e, 'draw')}
+            title="Drag to draw a new box"
         >
              {/* Only the box interacts, background passes through */}
              <div 
                 className="absolute border-2 pointer-events-auto cursor-move group touch-none shadow-[0_0_15px_rgba(37,99,235,0.5)] will-change-[top,left,width,height]"
                 style={{ ...style, borderColor: color, backgroundColor: bg }}
-                onMouseDown={(e) => {
-                    e.stopPropagation();
-                    if (!containerRef.current) return;
-                    const rect = containerRef.current.getBoundingClientRect();
-                    setDragState({ mode: 'move', startX: e.clientX, startY: e.clientY, startBox: [...boxData[activeKeyframe]] as SituationBox, rect });
-                }}
+                onPointerDown={(e) => startDrag(e, e.shiftKey ? 'draw' : 'move')}
+                title="Drag to move. Shift-drag to redraw."
              >
                 {/* Label */}
                 <div 
@@ -1322,16 +1309,20 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate, onTogglePlay }: any) =>
                 </div>
 
                 {/* Corner Handles */}
-                <Handle mode="nw" cursor="nw-resize" className="-top-6 -left-6" />
-                <Handle mode="ne" cursor="ne-resize" className="-top-6 -right-6" />
-                <Handle mode="sw" cursor="sw-resize" className="-bottom-6 -left-6" />
-                <Handle mode="se" cursor="se-resize" className="-bottom-6 -right-6" />
+                <Handle mode="nw" cursor="nw-resize" className="-top-7 -left-7" />
+                <Handle mode="ne" cursor="ne-resize" className="-top-7 -right-7" />
+                <Handle mode="sw" cursor="sw-resize" className="-bottom-7 -left-7" />
+                <Handle mode="se" cursor="se-resize" className="-bottom-7 -right-7" />
 
                 {/* Edge Handles */}
-                <Handle mode="n" cursor="n-resize" className="-top-6 left-1/2 -translate-x-1/2" />
-                <Handle mode="s" cursor="s-resize" className="-bottom-6 left-1/2 -translate-x-1/2" />
-                <Handle mode="w" cursor="w-resize" className="top-1/2 -translate-y-1/2 -left-6" />
-                <Handle mode="e" cursor="e-resize" className="top-1/2 -translate-y-1/2 -right-6" />
+                <EdgeZone mode="n" cursor="n-resize" className="-top-3 left-7 right-7 h-6" />
+                <EdgeZone mode="s" cursor="s-resize" className="-bottom-3 left-7 right-7 h-6" />
+                <EdgeZone mode="w" cursor="w-resize" className="top-7 bottom-7 -left-3 w-6" />
+                <EdgeZone mode="e" cursor="e-resize" className="top-7 bottom-7 -right-3 w-6" />
+                <Handle mode="n" cursor="n-resize" className="-top-7 left-1/2 -translate-x-1/2" />
+                <Handle mode="s" cursor="s-resize" className="-bottom-7 left-1/2 -translate-x-1/2" />
+                <Handle mode="w" cursor="w-resize" className="top-1/2 -translate-y-1/2 -left-7" />
+                <Handle mode="e" cursor="e-resize" className="top-1/2 -translate-y-1/2 -right-7" />
              </div>
         </div>
     );
