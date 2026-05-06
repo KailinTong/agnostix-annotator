@@ -593,6 +593,7 @@ const App = () => {
   useEffect(() => {
     setCurrentTime(0);
     setDuration(0);
+    setIsPlaying(false);
     setVideoError(null);
   }, [selectedItemIndex]);
 
@@ -620,6 +621,24 @@ const App = () => {
   const seekTo = (t: number) => {
       if (videoNode) videoNode.currentTime = t;
   };
+
+  const togglePlayback = useCallback(() => {
+      const video = videoRef.current;
+      if (!video) return;
+
+      if (video.paused || video.ended) {
+          setVideoError(null);
+          const playPromise = video.play();
+          if (playPromise !== undefined) {
+              playPromise.catch(() => {
+                  setIsPlaying(false);
+                  setVideoError('Playback failed. This browser may not support the video codec.');
+              });
+          }
+      } else {
+          video.pause();
+      }
+  }, []);
 
   // --- Render ---
 
@@ -811,9 +830,10 @@ const App = () => {
                                   src={videoUrl}
                                   crossOrigin={videoUrl.startsWith('http') ? "anonymous" : undefined}
                                   className="max-h-[calc(100vh-200px)] max-w-full shadow-lg block"
-                                  onClick={() => isPlaying ? videoRef.current?.pause() : videoRef.current?.play()}
+                                  onClick={togglePlayback}
                                   onPlay={() => setIsPlaying(true)}
                                   onPause={() => setIsPlaying(false)}
+                                  onEnded={() => setIsPlaying(false)}
                                   onError={(e) => {
                                       const v = e.currentTarget;
                                       const code = v.error?.code;
@@ -841,7 +861,7 @@ const App = () => {
                                       activeKeyframe={activeKeyframe}
                                       boxData={parsed.box_2d}
                                       onUpdate={updateBox}
-                                      onTogglePlay={() => isPlaying ? videoRef.current?.pause() : videoRef.current?.play()}
+                                      onTogglePlay={togglePlayback}
                                    />
                                )}
                            </div>
@@ -859,7 +879,7 @@ const App = () => {
                <div className="bg-gray-900 border-t border-gray-800 shrink-0 flex flex-col z-20 shadow-[-5px_0_15px_rgba(0,0,0,0.5)]">
                   {/* Play Controls Row */}
                   <div className="flex items-center gap-4 px-4 py-2 border-b border-gray-800">
-                      <Button variant="ghost" onClick={() => isPlaying ? videoRef.current?.pause() : videoRef.current?.play()}>
+                      <Button variant="ghost" onClick={togglePlayback}>
                           {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                       </Button>
                       <div className="text-xs font-mono text-gray-400 min-w-[100px]">
