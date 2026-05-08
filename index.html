@@ -17,6 +17,47 @@
     }
   }
   </script>
+  <style>
+    .video-scrubber {
+      height: 32px;
+      background: transparent;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+
+    .video-scrubber::-webkit-slider-runnable-track {
+      height: 8px;
+      border-radius: 999px;
+      background: #374151;
+    }
+
+    .video-scrubber::-webkit-slider-thumb {
+      width: 18px;
+      height: 18px;
+      margin-top: -5px;
+      border-radius: 999px;
+      background: #3b82f6;
+      border: 2px solid #dbeafe;
+      box-shadow: 0 1px 8px rgba(59, 130, 246, 0.45);
+      appearance: none;
+      -webkit-appearance: none;
+    }
+
+    .video-scrubber::-moz-range-track {
+      height: 8px;
+      border-radius: 999px;
+      background: #374151;
+    }
+
+    .video-scrubber::-moz-range-thumb {
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      background: #3b82f6;
+      border: 2px solid #dbeafe;
+      box-shadow: 0 1px 8px rgba(59, 130, 246, 0.45);
+    }
+  </style>
 <link rel="stylesheet" href="/index.css">
 </head>
 <body class="bg-gray-950 text-gray-200 overflow-hidden m-0 p-0">

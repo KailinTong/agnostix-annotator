@@ -138,6 +138,11 @@ interface DatasetItem {
   [key: string]: any;
 }
 
+interface TrashedItem {
+  deletedAt: string;
+  item: DatasetItem;
+}
+
 // --- Helper Functions ---
 
 const formatTime = (seconds: number) => {
@@ -232,6 +237,7 @@ const TimeInput = ({ value, duration, onChange }: { value: number, duration: num
 const App = () => {
   const [jsonFile, setJsonFile] = useState<File | null>(null);
   const [jsonData, setJsonData] = useState<DatasetItem[]>([]);
+  const [trashData, setTrashData] = useState<TrashedItem[]>([]);
   // videoFiles maps filename -> URL
   const [videoFiles, setVideoFiles] = useState<Map<string, string>>(new Map());
   const [isWorkspaceActive, setIsWorkspaceActive] = useState(false);
@@ -241,15 +247,24 @@ const App = () => {
   const [selectedItemIndex, setSelectedItemIndex] = useState<number>(-1);
   const [activeKeyframe, setActiveKeyframe] = useState<0 | 1>(0); // 0 = Start Frame, 1 = End Frame
   const [sidebarSearch, setSidebarSearch] = useState('');
+  const [sidebarWidth, setSidebarWidth] = useState(256);
 
   // Player
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [scrubTime, setScrubTime] = useState(0);
+  const [isScrubbing, setIsScrubbing] = useState(false);
   const [duration, setDuration] = useState(0);
   const [videoError, setVideoError] = useState<string | null>(null);
 
     const [videoNode, setVideoNode] = useState<HTMLVideoElement | null>(null);
     const videoRef = useRef<HTMLVideoElement | null>(null);
+    const isScrubbingRef = useRef(false);
+    const resumeAfterScrubRef = useRef(false);
+    const currentTimeRef = useRef(0);
+    const durationRef = useRef(0);
+    const scrubberRef = useRef<HTMLInputElement | null>(null);
+    const timeDisplayRef = useRef<HTMLDivElement | null>(null);
 
     // Persistence Key
     const STORAGE_KEY = 'denm_project_v1';
@@ -278,11 +293,20 @@ const App = () => {
             console.error("Failed to restore session", e);
         }
     }
+
+    const savedTrash = localStorage.getItem(`${STORAGE_KEY}_trash`);
+    if (savedTrash) {
+        try {
+            setTrashData(JSON.parse(savedTrash));
+        } catch (e) {
+            console.error("Failed to restore trash", e);
+        }
+    }
   }, []);
 
   // Save on Change
   useEffect(() => {
-    if (jsonData.length === 0) return;
+    if (jsonData.length === 0 && trashData.length === 0) return;
     
     const timeout = setTimeout(() => {
         // We only persist remote URLs, not blobs
@@ -306,10 +330,11 @@ const App = () => {
             }),
             videoMap: persistentMap
         }));
+        localStorage.setItem(`${STORAGE_KEY}_trash`, JSON.stringify(trashData));
     }, 1000); // Debounce 1s
 
     return () => clearTimeout(timeout);
-  }, [jsonData, videoFiles]);
+  }, [jsonData, videoFiles, trashData]);
 
   // --- Parsing Logic ---
 
@@ -581,20 +606,100 @@ const App = () => {
   const clearSession = () => {
       if(confirm("Are you sure? This will delete saved progress.")) {
           localStorage.removeItem(STORAGE_KEY);
+          localStorage.removeItem(`${STORAGE_KEY}_trash`);
           setJsonData([]);
+          setTrashData([]);
           setVideoFiles(new Map());
       }
   }
 
+  const deleteDatasetItem = useCallback((index: number) => {
+      const item = jsonData[index];
+      if (!item) return;
+
+      const ok = confirm(
+          `Delete this item?\n\n${item.video || item.video_filename || item.id}\n\nThis will remove it from the current dataset and move it into the app trash. Browsers cannot move or delete the original file on disk from its source folder.`
+      );
+      if (!ok) return;
+
+      setTrashData(prev => [{ deletedAt: new Date().toISOString(), item }, ...prev]);
+      setJsonData(prev => {
+          const next = prev.filter((_, i) => i !== index);
+          if (selectedItemIndex === index) {
+              setSelectedItemIndex(next.length === 0 ? -1 : Math.min(index, next.length - 1));
+          } else if (selectedItemIndex > index) {
+              setSelectedItemIndex(selectedItemIndex - 1);
+          }
+          return next;
+      });
+
+      const itemVideo = item.video || item.video_filename;
+      if (itemVideo) {
+          setVideoFiles(prev => {
+              const remaining = jsonData.some((other, i) => {
+                  if (i === index) return false;
+                  return other.video === itemVideo || other.video_filename === itemVideo;
+              });
+              if (remaining) return prev;
+
+              const next = new Map(prev);
+              next.delete(itemVideo);
+              next.delete(itemVideo.split('/').pop()!);
+              return next;
+          });
+      }
+  }, [jsonData, selectedItemIndex]);
+
+  const beginResizeSidebar = (e: React.PointerEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = sidebarWidth;
+
+      const handleMove = (ev: PointerEvent) => {
+          const nextWidth = Math.max(220, Math.min(520, startWidth + ev.clientX - startX));
+          setSidebarWidth(nextWidth);
+      };
+
+      const handleUp = () => {
+          window.removeEventListener('pointermove', handleMove);
+          window.removeEventListener('pointerup', handleUp);
+          window.removeEventListener('pointercancel', handleUp);
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+      };
+
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      window.addEventListener('pointermove', handleMove);
+      window.addEventListener('pointerup', handleUp);
+      window.addEventListener('pointercancel', handleUp);
+  };
+
   // --- Video Logic ---
+
+  const updatePlaybackChrome = useCallback((time: number, total = durationRef.current) => {
+      if (timeDisplayRef.current) {
+          timeDisplayRef.current.textContent = `${formatTime(time)} / ${formatTime(total)}`;
+      }
+      if (scrubberRef.current) {
+          scrubberRef.current.value = String(time);
+      }
+  }, []);
 
   // Clear stale playback state when the user navigates to a different item.
   // Kept separate so it never races with the videoNode remount below.
   useEffect(() => {
+    isScrubbingRef.current = false;
+    resumeAfterScrubRef.current = false;
+    currentTimeRef.current = 0;
+    durationRef.current = 0;
     setCurrentTime(0);
+    setScrubTime(0);
+    setIsScrubbing(false);
     setDuration(0);
     setIsPlaying(false);
     setVideoError(null);
+    updatePlaybackChrome(0, 0);
   }, [selectedItemIndex]);
 
   // Bind/unbind native video events whenever the DOM element changes.
@@ -603,24 +708,197 @@ const App = () => {
   useEffect(() => {
     if (!videoNode) return;
 
-    const ut = () => setCurrentTime(videoNode.currentTime);
-    const ud = () => setDuration(videoNode.duration);
+    const ut = () => {
+        if (isScrubbingRef.current) return;
+        currentTimeRef.current = videoNode.currentTime;
+        setCurrentTime(videoNode.currentTime);
+        updatePlaybackChrome(videoNode.currentTime);
+    };
+    const ud = () => {
+        if (isNaN(videoNode.duration)) return;
+        durationRef.current = videoNode.duration;
+        setDuration(videoNode.duration);
+        if (scrubberRef.current) scrubberRef.current.max = String(videoNode.duration);
+        updatePlaybackChrome(videoNode.currentTime, videoNode.duration);
+    };
 
     videoNode.addEventListener('timeupdate', ut);
     videoNode.addEventListener('loadedmetadata', ud);
 
+    currentTimeRef.current = videoNode.currentTime;
     setCurrentTime(videoNode.currentTime);
-    if (!isNaN(videoNode.duration)) setDuration(videoNode.duration);
+    updatePlaybackChrome(videoNode.currentTime);
+    if (!isNaN(videoNode.duration)) {
+        durationRef.current = videoNode.duration;
+        setDuration(videoNode.duration);
+        if (scrubberRef.current) scrubberRef.current.max = String(videoNode.duration);
+        updatePlaybackChrome(videoNode.currentTime, videoNode.duration);
+    }
 
     return () => {
         videoNode.removeEventListener('timeupdate', ut);
         videoNode.removeEventListener('loadedmetadata', ud);
     };
-  }, [videoNode]);
+  }, [videoNode, updatePlaybackChrome]);
 
-  const seekTo = (t: number) => {
-      if (videoNode) videoNode.currentTime = t;
+  const clampTime = useCallback((t: number) => {
+      const max = duration > 0 && Number.isFinite(duration) ? duration : t;
+      return Math.max(0, Math.min(max, t));
+  }, [duration]);
+
+  const seekVideoNow = useCallback((t: number) => {
+      const video = videoRef.current;
+      if (!video) return;
+      video.currentTime = t;
+  }, []);
+
+  const seekTo = useCallback((t: number) => {
+      const safeTime = clampTime(t);
+      currentTimeRef.current = safeTime;
+      setCurrentTime(safeTime);
+      setScrubTime(safeTime);
+      updatePlaybackChrome(safeTime);
+      seekVideoNow(safeTime);
+  }, [clampTime, seekVideoNow, updatePlaybackChrome]);
+
+  const beginScrub = () => {
+      const video = videoRef.current;
+      resumeAfterScrubRef.current = Boolean(video && !video.paused && !video.ended);
+      if (video && !video.paused) video.pause();
+      isScrubbingRef.current = true;
+      setIsScrubbing(true);
+      setScrubTime(currentTimeRef.current);
+      updatePlaybackChrome(currentTimeRef.current);
   };
+
+  const updateScrub = (t: number) => {
+      const safeTime = clampTime(t);
+      currentTimeRef.current = safeTime;
+      updatePlaybackChrome(safeTime);
+      seekVideoNow(safeTime);
+
+      if (!isScrubbingRef.current) {
+          setCurrentTime(safeTime);
+          setScrubTime(safeTime);
+      }
+  };
+
+  const commitScrub = (t = scrubTime) => {
+      if (!isScrubbingRef.current) return;
+      isScrubbingRef.current = false;
+      setIsScrubbing(false);
+      seekTo(t);
+      if (resumeAfterScrubRef.current) {
+          resumeAfterScrubRef.current = false;
+          videoRef.current?.play().catch(() => setIsPlaying(false));
+      }
+  };
+
+  const handleScrubKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (duration <= 0) return;
+
+      let nextTime: number | null = null;
+      const baseTime = isScrubbingRef.current ? scrubTime : currentTimeRef.current;
+      const step = e.shiftKey ? 5 : 1;
+
+      if (e.key === 'ArrowLeft') {
+          nextTime = baseTime - step;
+      } else if (e.key === 'ArrowRight') {
+          nextTime = baseTime + step;
+      } else if (e.key === 'Home') {
+          nextTime = 0;
+      } else if (e.key === 'End') {
+          nextTime = duration;
+      } else if (e.key === ' ') {
+          e.preventDefault();
+          togglePlayback();
+          return;
+      }
+
+      if (nextTime === null) return;
+
+      e.preventDefault();
+      seekTo(nextTime);
+  };
+
+  useEffect(() => {
+      if (!isWorkspaceActive) return;
+
+      const handleKeyDown = (e: KeyboardEvent) => {
+          const target = e.target as HTMLElement | null;
+          const tagName = target?.tagName;
+          const inputType = target instanceof HTMLInputElement ? target.type : '';
+          const isEditingText =
+              (tagName === 'INPUT' && inputType !== 'range') ||
+              tagName === 'TEXTAREA' ||
+              tagName === 'SELECT' ||
+              target?.isContentEditable;
+
+          if (isEditingText) return;
+
+          if (e.key === 'Delete' || e.key === 'Backspace') {
+              if (selectedItemIndex === -1) return;
+              e.preventDefault();
+              deleteDatasetItem(selectedItemIndex);
+              return;
+          }
+
+          if (e.key === ' ') {
+              e.preventDefault();
+              const video = videoRef.current;
+              if (!video) return;
+
+              if (video.paused || video.ended) {
+                  video.play().catch(() => setIsPlaying(false));
+              } else {
+                  video.pause();
+              }
+              return;
+          }
+
+          if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+              const visibleIndexes = jsonData
+                  .map((it, i) => ({ it, i }))
+                  .filter(({ it }) => !sidebarSearch || it.video?.toLowerCase().includes(sidebarSearch.toLowerCase()))
+                  .map(({ i }) => i);
+              if (visibleIndexes.length === 0) return;
+
+              const currentVisibleIndex = visibleIndexes.indexOf(selectedItemIndex);
+              const fallbackIndex = e.key === 'ArrowDown' ? -1 : 0;
+              const baseIndex = currentVisibleIndex === -1 ? fallbackIndex : currentVisibleIndex;
+              const nextVisibleIndex = e.key === 'ArrowDown'
+                  ? Math.min(baseIndex + 1, visibleIndexes.length - 1)
+                  : Math.max(baseIndex - 1, 0);
+
+              e.preventDefault();
+              setSelectedItemIndex(visibleIndexes[nextVisibleIndex]);
+              return;
+          }
+
+          if (duration <= 0) return;
+
+          let nextTime: number | null = null;
+          const step = e.shiftKey ? 5 : 1;
+
+          if (e.key === 'ArrowLeft') {
+              nextTime = currentTimeRef.current - step;
+          } else if (e.key === 'ArrowRight') {
+              nextTime = currentTimeRef.current + step;
+          } else if (e.key === 'Home') {
+              nextTime = 0;
+          } else if (e.key === 'End') {
+              nextTime = duration;
+          }
+
+          if (nextTime === null) return;
+
+          e.preventDefault();
+          seekTo(nextTime);
+      };
+
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isWorkspaceActive, duration, seekTo, jsonData, sidebarSearch, selectedItemIndex, deleteDatasetItem]);
 
   const togglePlayback = useCallback(() => {
       const video = videoRef.current;
@@ -769,6 +1047,11 @@ const App = () => {
       typeDisplay = parsed.cause_text;
       if (parsed.sub_cause_text) typeDisplay += ` - ${parsed.sub_cause_text}`;
   }
+  const displayTime = isScrubbing ? scrubTime : currentTime;
+  const visibleItemIndexes = jsonData
+      .map((it, i) => ({ it, i }))
+      .filter(({ it }) => !sidebarSearch || it.video?.toLowerCase().includes(sidebarSearch.toLowerCase()))
+      .map(({ i }) => i);
 
   return (
     <div className="h-screen flex flex-col bg-gray-950 text-gray-200 overflow-hidden font-sans selection:bg-blue-500/30">
@@ -781,6 +1064,11 @@ const App = () => {
               <span className="text-xs bg-gray-800 px-2 py-0.5 rounded text-gray-400">
                   {videoUrl ? (videoUrl.startsWith('http') ? 'Remote' : 'Local') : 'No Video'}
               </span>
+              {trashData.length > 0 && (
+                  <span className="text-xs bg-red-950/60 border border-red-900 px-2 py-0.5 rounded text-red-200">
+                      Trash {trashData.length}
+                  </span>
+              )}
           </div>
           <Button onClick={downloadJson} variant="primary" className="h-8">
               <Save className="w-4 h-4" /> Export
@@ -789,7 +1077,10 @@ const App = () => {
 
       <div className="flex-1 flex overflow-hidden">
           {/* List */}
-          <aside className="w-64 bg-gray-900 border-r border-gray-800 flex flex-col shrink-0 z-10">
+          <aside
+              className="bg-gray-900 border-r border-gray-800 flex flex-col shrink-0 z-10"
+              style={{ width: sidebarWidth }}
+          >
               <div className="px-2 py-2 border-b border-gray-800 shrink-0">
                   <input
                       type="text"
@@ -799,20 +1090,40 @@ const App = () => {
                       className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 placeholder-gray-600 outline-none focus:border-blue-500"
                   />
               </div>
-              <div className="flex-1 overflow-y-auto custom-scrollbar">
-                  {jsonData.map((it, i) => {
-                      if (sidebarSearch && !it.video?.toLowerCase().includes(sidebarSearch.toLowerCase())) return null;
+              <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar">
+                  {visibleItemIndexes.map((i) => {
+                      const it = jsonData[i];
                       return (
                           <div key={it.id || i}
                                onClick={() => setSelectedItemIndex(i)}
-                               className={`px-4 py-3 border-b border-gray-800 cursor-pointer flex justify-between items-center transition-colors ${selectedItemIndex === i ? 'bg-blue-900/20 border-l-2 border-l-blue-500' : 'hover:bg-gray-800'}`}>
-                              <div className="text-xs font-mono text-gray-400 overflow-hidden whitespace-nowrap" title={it.video} style={{direction:'rtl', textOverflow:'ellipsis'}}>{it.video}</div>
-                              {it._parsed?.situation === 1 && <AlertTriangle className="w-3 h-3 text-orange-500" />}
+                               className={`px-3 py-3 border-b border-gray-800 cursor-pointer flex items-center gap-2 transition-colors ${selectedItemIndex === i ? 'bg-blue-900/20 border-l-2 border-l-blue-500' : 'hover:bg-gray-800'}`}>
+                              <div
+                                  className="flex-1 min-w-0 text-xs font-mono text-gray-400 overflow-hidden whitespace-nowrap truncate"
+                                  title={it.video}
+                              >
+                                  {it.video}
+                              </div>
+                              {it._parsed?.situation === 1 && <AlertTriangle className="w-3 h-3 text-orange-500 shrink-0" />}
+                              <button
+                                  className="w-7 h-7 rounded flex items-center justify-center text-gray-500 hover:text-red-200 hover:bg-red-900/40 shrink-0"
+                                  title="Move item to trash"
+                                  onClick={(e) => {
+                                      e.stopPropagation();
+                                      deleteDatasetItem(i);
+                                  }}
+                              >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                              </button>
                           </div>
                       );
                   })}
               </div>
           </aside>
+          <div
+              className="w-1.5 shrink-0 cursor-col-resize bg-gray-900 hover:bg-blue-600 active:bg-blue-500 transition-colors z-20"
+              onPointerDown={beginResizeSidebar}
+              title="Drag to resize the video list"
+          />
 
           {/* Main */}
           <main className="flex-1 bg-black flex flex-col relative">
@@ -882,14 +1193,23 @@ const App = () => {
                       <Button variant="ghost" onClick={togglePlayback}>
                           {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                       </Button>
-                      <div className="text-xs font-mono text-gray-400 min-w-[100px]">
-                          {formatTime(currentTime)} / {formatTime(duration)}
+                      <div ref={timeDisplayRef} className="text-xs font-mono text-gray-400 min-w-[100px]">
+                          {formatTime(displayTime)} / {formatTime(duration)}
                       </div>
-                      <input 
-                          type="range" min={0} max={duration || 100} step={0.1} value={currentTime}
-                          onChange={e => seekTo(Number(e.target.value))}
-                          className="flex-1 accent-blue-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer hover:h-1.5 transition-all"
-                      />
+                      <div className="flex-1 h-8 flex items-center px-1 cursor-pointer">
+                          <input 
+                              ref={scrubberRef}
+                              type="range" min={0} max={duration || 100} step={0.01} defaultValue={displayTime}
+                              onPointerDown={beginScrub}
+                              onPointerUp={e => commitScrub(Number(e.currentTarget.value))}
+                              onPointerCancel={e => commitScrub(Number(e.currentTarget.value))}
+                              onBlur={e => commitScrub(Number(e.currentTarget.value))}
+                              onKeyDown={handleScrubKeyDown}
+                              onKeyUp={e => commitScrub(Number(e.currentTarget.value))}
+                              onInput={e => updateScrub(Number(e.currentTarget.value))}
+                              className="video-scrubber w-full cursor-pointer accent-blue-500"
+                          />
+                      </div>
                   </div>
                   
                   {/* Spatiotemporal Editor Row */}
