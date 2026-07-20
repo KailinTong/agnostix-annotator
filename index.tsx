@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
   Upload, Play, Pause, SkipBack, SkipForward, 
@@ -131,7 +131,7 @@ interface SituationData {
 }
 
 interface DatasetItem {
-  id: number;
+  id: number | string;
   video: string;
   conversations: { from: string; value: string }[];
   _parsed?: SituationData; // Internal field for editing
@@ -143,6 +143,72 @@ interface TrashedItem {
   item: DatasetItem;
 }
 
+interface AutosaveSnapshot {
+  jsonData: DatasetItem[];
+  trashData: TrashedItem[];
+  videoMap: Record<string, string>;
+  savedAt: string;
+}
+
+const AUTOSAVE_DB_NAME = 'denm_annotator_autosave';
+const AUTOSAVE_STORE_NAME = 'snapshots';
+
+const openAutosaveDb = () => new Promise<IDBDatabase>((resolve, reject) => {
+  const req = indexedDB.open(AUTOSAVE_DB_NAME, 1);
+  req.onupgradeneeded = () => {
+    const db = req.result;
+    if (!db.objectStoreNames.contains(AUTOSAVE_STORE_NAME)) {
+      db.createObjectStore(AUTOSAVE_STORE_NAME);
+    }
+  };
+  req.onsuccess = () => resolve(req.result);
+  req.onerror = () => reject(req.error);
+});
+
+const readAutosaveSnapshot = async (key: string): Promise<AutosaveSnapshot | null> => {
+  const db = await openAutosaveDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(AUTOSAVE_STORE_NAME, 'readonly');
+    const req = tx.objectStore(AUTOSAVE_STORE_NAME).get(key);
+    req.onsuccess = () => resolve((req.result as AutosaveSnapshot | undefined) ?? null);
+    req.onerror = () => reject(req.error);
+    tx.oncomplete = () => db.close();
+    tx.onerror = () => db.close();
+  });
+};
+
+const writeAutosaveSnapshot = async (key: string, snapshot: AutosaveSnapshot) => {
+  const db = await openAutosaveDb();
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(AUTOSAVE_STORE_NAME, 'readwrite');
+    tx.objectStore(AUTOSAVE_STORE_NAME).put(snapshot, key);
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error);
+    };
+  });
+};
+
+const deleteAutosaveSnapshot = async (key: string) => {
+  const db = await openAutosaveDb();
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(AUTOSAVE_STORE_NAME, 'readwrite');
+    tx.objectStore(AUTOSAVE_STORE_NAME).delete(key);
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error);
+    };
+  });
+};
+
 // --- Helper Functions ---
 
 const formatTime = (seconds: number) => {
@@ -150,6 +216,31 @@ const formatTime = (seconds: number) => {
   const s = Math.floor(seconds % 60);
   const ms = Math.floor((seconds % 1) * 100);
   return `${m}:${s.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
+};
+
+const normalizeClipDuration = (rawDuration: number) => {
+  if (!Number.isFinite(rawDuration) || rawDuration <= 0) return 0;
+  // The TUMTraffic clips are intended to be 5s. Browsers may report values like
+  // 5.03/5.07 because of MP4 time bases, frame boundaries, or non-zero PTS.
+  return rawDuration >= 4.95 && rawDuration <= 5.2 ? 5 : rawDuration;
+};
+
+const nextExportFilename = (inputName?: string | null) => {
+  const fallbackName = 'annotated_dataset.json';
+  const originalName = inputName || fallbackName;
+  const dotIndex = originalName.lastIndexOf('.');
+  const ext = dotIndex > 0 ? originalName.slice(dotIndex) : '.json';
+  let base = dotIndex > 0 ? originalName.slice(0, dotIndex) : originalName;
+
+  // Old exports used to repeatedly add annotated_. Collapse those prefixes so
+  // names do not grow like annotated_annotated_....json.
+  base = base.replace(/^(annotated_)+/i, '');
+
+  const numbered = base.match(/^(.*?)(?:_)(\d+)$/);
+  if (numbered) {
+      return `${numbered[1]}_${Number(numbered[2]) + 1}${ext}`;
+  }
+  return `${base}_1${ext}`;
 };
 
 // --- Components ---
@@ -238,8 +329,11 @@ const App = () => {
   const [jsonFile, setJsonFile] = useState<File | null>(null);
   const [jsonData, setJsonData] = useState<DatasetItem[]>([]);
   const [trashData, setTrashData] = useState<TrashedItem[]>([]);
-  // videoFiles maps filename -> URL
-  const [videoFiles, setVideoFiles] = useState<Map<string, string>>(new Map());
+  // videoFiles maps filename -> File for local uploads, or URL for persistent remote videos.
+  // Local blob URLs are created lazily only for the selected video to avoid holding
+  // thousands of object URLs in memory when a large folder is loaded.
+  const [videoFiles, setVideoFiles] = useState<Map<string, File | string>>(new Map());
+  const [activeVideoUrl, setActiveVideoUrl] = useState<string | undefined>(undefined);
   const [isWorkspaceActive, setIsWorkspaceActive] = useState(false);
   const [isDragging, setIsDragging] = useState<'json' | 'video' | null>(null);
   
@@ -248,6 +342,9 @@ const App = () => {
   const [activeKeyframe, setActiveKeyframe] = useState<0 | 1>(0); // 0 = Start Frame, 1 = End Frame
   const [sidebarSearch, setSidebarSearch] = useState('');
   const [sidebarWidth, setSidebarWidth] = useState(256);
+  const [listScrollTop, setListScrollTop] = useState(0);
+  const [listViewportHeight, setListViewportHeight] = useState(600);
+  const listViewportRef = useRef<HTMLDivElement | null>(null);
 
   // Player
   const [isPlaying, setIsPlaying] = useState(false);
@@ -263,6 +360,7 @@ const App = () => {
     const resumeAfterScrubRef = useRef(false);
     const currentTimeRef = useRef(0);
     const durationRef = useRef(0);
+    const rawDurationRef = useRef(0);
     const scrubberRef = useRef<HTMLInputElement | null>(null);
     const timeDisplayRef = useRef<HTMLDivElement | null>(null);
 
@@ -273,6 +371,18 @@ const App = () => {
 
   // Load on Mount
   useEffect(() => {
+    const restoreVideoMap = (savedMap: unknown) => {
+        const newMap = new Map<string, File | string>();
+        if (savedMap && typeof savedMap === 'object') {
+            Object.entries(savedMap as Record<string, unknown>).forEach(([k, v]) => {
+                if (typeof v === 'string' && v.startsWith('http')) {
+                    newMap.set(k, v);
+                }
+            });
+        }
+        setVideoFiles(newMap);
+    };
+
     const savedData = localStorage.getItem(STORAGE_KEY);
     
     if (savedData) {
@@ -280,15 +390,7 @@ const App = () => {
             const { jsonData: savedJson, videoMap: savedMap } = JSON.parse(savedData);
             setJsonData(savedJson);
             // Restore persistent remote URLs (Drive links or generic URLs), but local blob URLs are invalid
-            const newMap = new Map<string, string>();
-            if (savedMap) {
-                Object.entries(savedMap).forEach(([k, v]) => {
-                    if (typeof v === 'string' && v.startsWith('http')) {
-                        newMap.set(k, v as string);
-                    }
-                });
-            }
-            setVideoFiles(newMap);
+            restoreVideoMap(savedMap);
         } catch (e) {
             console.error("Failed to restore session", e);
         }
@@ -302,6 +404,16 @@ const App = () => {
             console.error("Failed to restore trash", e);
         }
     }
+
+    let cancelled = false;
+    readAutosaveSnapshot(STORAGE_KEY).then(snapshot => {
+        if (cancelled || !snapshot) return;
+        setJsonData(snapshot.jsonData || []);
+        setTrashData(snapshot.trashData || []);
+        restoreVideoMap(snapshot.videoMap);
+    }).catch(e => console.warn('Failed to restore IndexedDB autosave', e));
+
+    return () => { cancelled = true; };
   }, []);
 
   // Save on Change
@@ -312,25 +424,44 @@ const App = () => {
         // We only persist remote URLs, not blobs
         const persistentMap: Record<string, string> = {};
         videoFiles.forEach((v, k) => {
-            if (v.startsWith('http')) persistentMap[k] = v;
+            if (typeof v === 'string' && v.startsWith('http')) persistentMap[k] = v;
         });
 
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({
-            jsonData: jsonData.map(item => {
-                const { ...rest } = item;
-                // Ensure we don't accidentally persist any DOM nodes or circular refs
-                // that might have leaked into the object via [key: string]: any
-                return Object.fromEntries(
-                    Object.entries(rest).filter(([k, v]) => 
-                        k !== 'videoNode' && 
-                        typeof v !== 'function' && 
-                        !(v instanceof HTMLElement)
-                    )
-                );
-            }),
-            videoMap: persistentMap
-        }));
-        localStorage.setItem(`${STORAGE_KEY}_trash`, JSON.stringify(trashData));
+        const sanitizedJsonData = jsonData.map(item => {
+            const { ...rest } = item;
+            // Ensure we don't accidentally persist any DOM nodes or circular refs
+            // that might have leaked into the object via [key: string]: any
+            return Object.fromEntries(
+                Object.entries(rest).filter(([k, v]) =>
+                    k !== 'videoNode' &&
+                    typeof v !== 'function' &&
+                    !(v instanceof HTMLElement)
+                )
+            ) as DatasetItem;
+        });
+
+        const snapshot: AutosaveSnapshot = {
+            jsonData: sanitizedJsonData,
+            trashData,
+            videoMap: persistentMap,
+            savedAt: new Date().toISOString(),
+        };
+
+        writeAutosaveSnapshot(STORAGE_KEY, snapshot)
+            .catch(err => console.warn('IndexedDB autosave failed', err));
+
+        try {
+            const smallSnapshot = JSON.stringify({ jsonData: sanitizedJsonData, videoMap: persistentMap });
+            if (smallSnapshot.length < 4_000_000) {
+                localStorage.setItem(STORAGE_KEY, smallSnapshot);
+            } else {
+                localStorage.removeItem(STORAGE_KEY);
+            }
+            localStorage.setItem(`${STORAGE_KEY}_trash`, JSON.stringify(trashData));
+        } catch (err) {
+            localStorage.removeItem(STORAGE_KEY);
+            console.warn('localStorage autosave skipped; IndexedDB autosave is used instead.', err);
+        }
     }, 1000); // Debounce 1s
 
     return () => clearTimeout(timeout);
@@ -385,7 +516,7 @@ const App = () => {
     const newMap = new Map(videoFiles);
     Array.from(files).forEach((file) => {
        if (file.type.startsWith('video/') || file.name.match(/\.(mp4|webm|ogg|mov|avi|mkv|m4v)$/i)) {
-           newMap.set(file.name, URL.createObjectURL(file));
+           newMap.set(file.name, file);
        }
     });
     setVideoFiles(newMap);
@@ -427,7 +558,7 @@ const App = () => {
           }));
           setJsonData(generated);
       }
-      setSelectedItemIndex(0);
+      setSelectedItemIndex(visibleItemIndexes[0] ?? 0);
       setIsWorkspaceActive(true);
   };
 
@@ -547,10 +678,10 @@ const App = () => {
           
           // Ensure correct schema typing for NULLs
           const cleanParsed: SituationData = {
-              situation: situation || 0, 
+              situation: situation ?? 0,
               message_type: situation === 1 ? "DENM" : "none", 
-              cause_code: situation === 1 ? (cause_code || null) : null, 
-              sub_cause_code: situation === 1 ? (sub_cause_code || null) : null,
+              cause_code: situation === 1 ? (cause_code ?? null) : null,
+              sub_cause_code: situation === 1 ? (sub_cause_code ?? null) : null,
               cause_text: situation === 1 ? (cause_text || null) : null, 
               sub_cause_text: situation === 1 ? (sub_cause_text || null) : null, 
               box_2d: situation === 1 ? (box_2d || []) : [], 
@@ -599,7 +730,7 @@ const App = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = jsonFile ? `annotated_${jsonFile.name}` : 'annotated_dataset.json';
+      a.download = nextExportFilename(jsonFile?.name);
       a.click();
   };
 
@@ -607,6 +738,7 @@ const App = () => {
       if(confirm("Are you sure? This will delete saved progress.")) {
           localStorage.removeItem(STORAGE_KEY);
           localStorage.removeItem(`${STORAGE_KEY}_trash`);
+          deleteAutosaveSnapshot(STORAGE_KEY).catch(e => console.warn('Failed to clear IndexedDB autosave', e));
           setJsonData([]);
           setTrashData([]);
           setVideoFiles(new Map());
@@ -686,6 +818,14 @@ const App = () => {
       }
   }, []);
 
+  const mediaTimeToDisplayTime = useCallback((mediaTime: number) => {
+      const normalizedDuration = durationRef.current;
+      if (normalizedDuration === 5 && rawDurationRef.current !== 5 && mediaTime >= 0 && mediaTime <= 0.16) {
+          return 0;
+      }
+      return Math.max(0, Math.min(normalizedDuration || mediaTime, mediaTime));
+  }, []);
+
   // Clear stale playback state when the user navigates to a different item.
   // Kept separate so it never races with the videoNode remount below.
   useEffect(() => {
@@ -693,6 +833,7 @@ const App = () => {
     resumeAfterScrubRef.current = false;
     currentTimeRef.current = 0;
     durationRef.current = 0;
+    rawDurationRef.current = 0;
     setCurrentTime(0);
     setScrubTime(0);
     setIsScrubbing(false);
@@ -710,36 +851,43 @@ const App = () => {
 
     const ut = () => {
         if (isScrubbingRef.current) return;
-        currentTimeRef.current = videoNode.currentTime;
-        setCurrentTime(videoNode.currentTime);
-        updatePlaybackChrome(videoNode.currentTime);
+        const displayTime = mediaTimeToDisplayTime(videoNode.currentTime);
+        currentTimeRef.current = displayTime;
+        updatePlaybackChrome(displayTime);
     };
     const ud = () => {
         if (isNaN(videoNode.duration)) return;
-        durationRef.current = videoNode.duration;
-        setDuration(videoNode.duration);
-        if (scrubberRef.current) scrubberRef.current.max = String(videoNode.duration);
-        updatePlaybackChrome(videoNode.currentTime, videoNode.duration);
+        const normalizedDuration = normalizeClipDuration(videoNode.duration);
+        rawDurationRef.current = videoNode.duration;
+        durationRef.current = normalizedDuration;
+        setDuration(normalizedDuration);
+        if (scrubberRef.current) scrubberRef.current.max = String(normalizedDuration);
+        updatePlaybackChrome(mediaTimeToDisplayTime(videoNode.currentTime), normalizedDuration);
     };
 
     videoNode.addEventListener('timeupdate', ut);
     videoNode.addEventListener('loadedmetadata', ud);
 
-    currentTimeRef.current = videoNode.currentTime;
-    setCurrentTime(videoNode.currentTime);
-    updatePlaybackChrome(videoNode.currentTime);
+    currentTimeRef.current = mediaTimeToDisplayTime(videoNode.currentTime);
+    setCurrentTime(currentTimeRef.current);
+    updatePlaybackChrome(currentTimeRef.current);
     if (!isNaN(videoNode.duration)) {
-        durationRef.current = videoNode.duration;
-        setDuration(videoNode.duration);
-        if (scrubberRef.current) scrubberRef.current.max = String(videoNode.duration);
-        updatePlaybackChrome(videoNode.currentTime, videoNode.duration);
+        const normalizedDuration = normalizeClipDuration(videoNode.duration);
+        rawDurationRef.current = videoNode.duration;
+        durationRef.current = normalizedDuration;
+        setDuration(normalizedDuration);
+        if (scrubberRef.current) scrubberRef.current.max = String(normalizedDuration);
+        const displayTime = mediaTimeToDisplayTime(videoNode.currentTime);
+        currentTimeRef.current = displayTime;
+        setCurrentTime(displayTime);
+        updatePlaybackChrome(displayTime, normalizedDuration);
     }
 
     return () => {
         videoNode.removeEventListener('timeupdate', ut);
         videoNode.removeEventListener('loadedmetadata', ud);
     };
-  }, [videoNode, updatePlaybackChrome]);
+  }, [videoNode, updatePlaybackChrome, mediaTimeToDisplayTime]);
 
   const clampTime = useCallback((t: number) => {
       const max = duration > 0 && Number.isFinite(duration) ? duration : t;
@@ -761,14 +909,22 @@ const App = () => {
       seekVideoNow(safeTime);
   }, [clampTime, seekVideoNow, updatePlaybackChrome]);
 
-  const beginScrub = () => {
+  const getScrubTimeFromPointer = (input: HTMLInputElement, clientX: number) => {
+      const rect = input.getBoundingClientRect();
+      if (rect.width <= 0) return currentTimeRef.current;
+      const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      return ratio * (durationRef.current || duration || 0);
+  };
+
+  const beginScrub = (e: React.PointerEvent<HTMLInputElement>) => {
       const video = videoRef.current;
       resumeAfterScrubRef.current = Boolean(video && !video.paused && !video.ended);
       if (video && !video.paused) video.pause();
       isScrubbingRef.current = true;
       setIsScrubbing(true);
-      setScrubTime(currentTimeRef.current);
-      updatePlaybackChrome(currentTimeRef.current);
+      const nextTime = getScrubTimeFromPointer(e.currentTarget, e.clientX);
+      setScrubTime(nextTime);
+      updateScrub(nextTime);
   };
 
   const updateScrub = (t: number) => {
@@ -821,6 +977,55 @@ const App = () => {
       seekTo(nextTime);
   };
 
+  // When local videos are loaded, keep the workspace focused on dataset rows
+  // that can actually be reviewed. The complete dataset remains in jsonData
+  // and is still included in exports.
+  const visibleItemIndexes = useMemo(() => {
+      const search = sidebarSearch.trim().toLowerCase();
+      return jsonData.reduce<number[]>((indexes, it, i) => {
+          const videoName = it.video || it.video_filename || '';
+          const basename = videoName.split('/').pop() || videoName;
+          const hasVideo = videoFiles.size === 0 || videoFiles.has(videoName) || videoFiles.has(basename);
+          const matchesSearch = !search || videoName.toLowerCase().includes(search);
+          if (hasVideo && matchesSearch) indexes.push(i);
+          return indexes;
+      }, []);
+  }, [jsonData, sidebarSearch, videoFiles]);
+
+  const LIST_ROW_HEIGHT = 52;
+  const LIST_OVERSCAN = 8;
+  const virtualList = useMemo(() => {
+      const start = Math.max(0, Math.floor(listScrollTop / LIST_ROW_HEIGHT) - LIST_OVERSCAN);
+      const count = Math.ceil(listViewportHeight / LIST_ROW_HEIGHT) + LIST_OVERSCAN * 2;
+      return {
+          start,
+          indexes: visibleItemIndexes.slice(start, start + count),
+          totalHeight: visibleItemIndexes.length * LIST_ROW_HEIGHT,
+      };
+  }, [visibleItemIndexes, listScrollTop, listViewportHeight]);
+
+  useEffect(() => {
+      const viewport = listViewportRef.current;
+      if (!viewport) return;
+      const updateHeight = () => setListViewportHeight(viewport.clientHeight);
+      updateHeight();
+      const observer = new ResizeObserver(updateHeight);
+      observer.observe(viewport);
+      return () => observer.disconnect();
+  }, [isWorkspaceActive]);
+
+  useEffect(() => {
+      const viewport = listViewportRef.current;
+      const position = visibleItemIndexes.indexOf(selectedItemIndex);
+      if (!viewport || position < 0) return;
+      const rowTop = position * LIST_ROW_HEIGHT;
+      const rowBottom = rowTop + LIST_ROW_HEIGHT;
+      if (rowTop < viewport.scrollTop) viewport.scrollTop = rowTop;
+      else if (rowBottom > viewport.scrollTop + viewport.clientHeight) {
+          viewport.scrollTop = rowBottom - viewport.clientHeight;
+      }
+  }, [selectedItemIndex, visibleItemIndexes]);
+
   useEffect(() => {
       if (!isWorkspaceActive) return;
 
@@ -857,21 +1062,17 @@ const App = () => {
           }
 
           if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-              const visibleIndexes = jsonData
-                  .map((it, i) => ({ it, i }))
-                  .filter(({ it }) => !sidebarSearch || it.video?.toLowerCase().includes(sidebarSearch.toLowerCase()))
-                  .map(({ i }) => i);
-              if (visibleIndexes.length === 0) return;
+              if (visibleItemIndexes.length === 0) return;
 
-              const currentVisibleIndex = visibleIndexes.indexOf(selectedItemIndex);
+              const currentVisibleIndex = visibleItemIndexes.indexOf(selectedItemIndex);
               const fallbackIndex = e.key === 'ArrowDown' ? -1 : 0;
               const baseIndex = currentVisibleIndex === -1 ? fallbackIndex : currentVisibleIndex;
               const nextVisibleIndex = e.key === 'ArrowDown'
-                  ? Math.min(baseIndex + 1, visibleIndexes.length - 1)
+                  ? Math.min(baseIndex + 1, visibleItemIndexes.length - 1)
                   : Math.max(baseIndex - 1, 0);
 
               e.preventDefault();
-              setSelectedItemIndex(visibleIndexes[nextVisibleIndex]);
+              setSelectedItemIndex(visibleItemIndexes[nextVisibleIndex]);
               return;
           }
 
@@ -898,7 +1099,7 @@ const App = () => {
 
       window.addEventListener('keydown', handleKeyDown);
       return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isWorkspaceActive, duration, seekTo, jsonData, sidebarSearch, selectedItemIndex, deleteDatasetItem]);
+  }, [isWorkspaceActive, duration, seekTo, visibleItemIndexes, selectedItemIndex, deleteDatasetItem]);
 
   const togglePlayback = useCallback(() => {
       const video = videoRef.current;
@@ -917,6 +1118,42 @@ const App = () => {
           video.pause();
       }
   }, []);
+
+  const selectedItem = selectedItemIndex >= 0 ? jsonData[selectedItemIndex] : undefined;
+  const selectedVideoSource = useMemo<File | string | undefined>(() => {
+      if (!selectedItem) return undefined;
+      const candidates = [selectedItem.video, selectedItem.video_filename].filter(Boolean) as string[];
+      for (const candidate of candidates) {
+          const basename = candidate.split('/').pop() || candidate;
+          const source = videoFiles.get(candidate) || videoFiles.get(basename);
+          if (source) return source;
+      }
+      return undefined;
+  }, [selectedItem, videoFiles]);
+
+  useEffect(() => {
+      setVideoError(null);
+      setIsPlaying(false);
+      currentTimeRef.current = 0;
+      rawDurationRef.current = 0;
+      setCurrentTime(0);
+      setScrubTime(0);
+      updatePlaybackChrome(0);
+
+      if (!selectedVideoSource) {
+          setActiveVideoUrl(undefined);
+          return;
+      }
+
+      if (typeof selectedVideoSource === 'string') {
+          setActiveVideoUrl(selectedVideoSource);
+          return;
+      }
+
+      const objectUrl = URL.createObjectURL(selectedVideoSource);
+      setActiveVideoUrl(objectUrl);
+      return () => URL.revokeObjectURL(objectUrl);
+  }, [selectedVideoSource, updatePlaybackChrome]);
 
   // --- Render ---
 
@@ -1030,16 +1267,9 @@ const App = () => {
       )
   }
 
-  const item = jsonData[selectedItemIndex];
+  const item = selectedItem;
   const parsed = item?._parsed;
-  
-  // Video Matcher
-  let videoUrl = undefined;
-  if (item) {
-      const candidates = [item.video, item.video_filename];
-      const match = candidates.find(c => videoFiles.has(c)) || candidates.find(c => videoFiles.has(c?.split('/').pop()));
-      if (match) videoUrl = videoFiles.get(match) || videoFiles.get(match.split('/').pop()!);
-  }
+  const videoUrl = activeVideoUrl;
 
   // Compute Type Display
   let typeDisplay = "none";
@@ -1047,12 +1277,10 @@ const App = () => {
       typeDisplay = parsed.cause_text;
       if (parsed.sub_cause_text) typeDisplay += ` - ${parsed.sub_cause_text}`;
   }
+  const sampleIdDisplay = item
+      ? String(item.sample_id ?? item.sampleId ?? item.simple_id ?? item.simpleId ?? item.segment_index ?? '')
+      : '';
   const displayTime = isScrubbing ? scrubTime : currentTime;
-  const visibleItemIndexes = jsonData
-      .map((it, i) => ({ it, i }))
-      .filter(({ it }) => !sidebarSearch || it.video?.toLowerCase().includes(sidebarSearch.toLowerCase()))
-      .map(({ i }) => i);
-
   return (
     <div className="h-screen flex flex-col bg-gray-950 text-gray-200 overflow-hidden font-sans selection:bg-blue-500/30">
       {/* Header */}
@@ -1086,17 +1314,27 @@ const App = () => {
                       type="text"
                       placeholder="Filter by filename…"
                       value={sidebarSearch}
-                      onChange={e => setSidebarSearch(e.target.value)}
+                      onChange={e => {
+                          setSidebarSearch(e.target.value);
+                          setListScrollTop(0);
+                          if (listViewportRef.current) listViewportRef.current.scrollTop = 0;
+                      }}
                       className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 placeholder-gray-600 outline-none focus:border-blue-500"
                   />
               </div>
-              <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar">
-                  {visibleItemIndexes.map((i) => {
+              <div
+                  ref={listViewportRef}
+                  className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar"
+                  onScroll={(e) => setListScrollTop(e.currentTarget.scrollTop)}
+              >
+                <div className="relative" style={{ height: virtualList.totalHeight }}>
+                  {virtualList.indexes.map((i, offset) => {
                       const it = jsonData[i];
                       return (
                           <div key={it.id || i}
                                onClick={() => setSelectedItemIndex(i)}
-                               className={`px-3 py-3 border-b border-gray-800 cursor-pointer flex items-center gap-2 transition-colors ${selectedItemIndex === i ? 'bg-blue-900/20 border-l-2 border-l-blue-500' : 'hover:bg-gray-800'}`}>
+                               className={`absolute left-0 right-0 px-3 border-b border-gray-800 cursor-pointer flex items-center gap-2 transition-colors ${selectedItemIndex === i ? 'bg-blue-900/20 border-l-2 border-l-blue-500' : 'hover:bg-gray-800'}`}
+                               style={{ top: (virtualList.start + offset) * LIST_ROW_HEIGHT, height: LIST_ROW_HEIGHT }}>
                               <div
                                   className="flex-1 min-w-0 text-xs font-mono text-gray-400 overflow-hidden whitespace-nowrap truncate"
                                   title={it.video}
@@ -1117,6 +1355,7 @@ const App = () => {
                           </div>
                       );
                   })}
+                </div>
               </div>
           </aside>
           <div
@@ -1287,7 +1526,7 @@ const App = () => {
                           <Button variant="outline" className="text-xs h-8 whitespace-nowrap" 
                             onClick={() => {
                                 // Sync time
-                                const newT = duration > 0 ? currentTime / duration : 0;
+                                const newT = duration > 0 ? currentTimeRef.current / duration : 0;
                                 const currentBox = parsed.box_2d[activeKeyframe];
                                 updateBox(activeKeyframe, [newT, currentBox[1], currentBox[2], currentBox[3], currentBox[4]]);
                             }}>
@@ -1318,10 +1557,10 @@ const App = () => {
                              <div className="space-y-1">
                                  <label className="text-[10px] font-bold text-gray-500 uppercase">ID</label>
                                  <input 
-                                     type="number"
+                                     type="text"
                                      className="w-full bg-gray-950 border border-gray-700 text-sm text-gray-200 rounded-md px-3 py-2 focus:border-blue-500 outline-none font-mono transition-colors"
-                                     value={item.id}
-                                     onChange={(e) => updateMeta('id', parseInt(e.target.value) || 0)}
+                                     value={item.id ?? ''}
+                                     onChange={(e) => updateMeta('id', e.target.value)}
                                  />
                              </div>
                              <div className="space-y-1">
@@ -1329,9 +1568,9 @@ const App = () => {
                                  <input 
                                      type="text"
                                      className="w-full bg-gray-950 border border-gray-700 text-sm text-gray-200 rounded-md px-3 py-2 focus:border-blue-500 outline-none font-mono transition-colors"
-                                     value={item.sample_id || ""}
+                                     value={sampleIdDisplay}
                                      onChange={(e) => updateMeta('sample_id', e.target.value)}
-                                     title={item.sample_id}
+                                     title={sampleIdDisplay}
                                  />
                              </div>
                           </div>
@@ -1456,11 +1695,22 @@ const App = () => {
 
 const BoxOverlay = ({ activeKeyframe, boxData, onUpdate, onTogglePlay }: any) => {
     const containerRef = useRef<HTMLDivElement>(null);
+    const sourceBox = boxData?.[activeKeyframe] as SituationBox | undefined;
+    const [draftBox, setDraftBox] = useState<SituationBox>(() => sourceBox ? [...sourceBox] as SituationBox : [0, 0, 0, 0, 0]);
+    const draftBoxRef = useRef<SituationBox>(draftBox);
+    const isDraggingRef = useRef(false);
     type DragMode = 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w' | 'draw';
 
-    if (!boxData || !boxData[activeKeyframe]) return null;
+    useEffect(() => {
+        if (!sourceBox || isDraggingRef.current) return;
+        const next = [...sourceBox] as SituationBox;
+        draftBoxRef.current = next;
+        setDraftBox(next);
+    }, [sourceBox, activeKeyframe]);
 
-    const [t, ymin, xmin, ymax, xmax] = boxData[activeKeyframe];
+    if (!sourceBox) return null;
+
+    const [, ymin, xmin, ymax, xmax] = draftBox;
     
     // Convert 0-1000 to percentages
     const style = {
@@ -1485,25 +1735,24 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate, onTogglePlay }: any) =>
         const startBox = [...boxData[activeKeyframe]] as SituationBox;
         const normalize = (val: number, dim: number) => (val / dim) * 1000;
 
-        const updateFromPointer = (clientX: number, clientY: number) => {
+        const updateFromPointer = (clientX: number, clientY: number): SituationBox | null => {
             if (mode === 'draw') {
                 const dx = clientX - startX;
                 const dy = clientY - startY;
-                if (Math.sqrt(dx * dx + dy * dy) < 3) return;
+                if (Math.sqrt(dx * dx + dy * dy) < 3) return null;
 
                 const startXRel = normalize(startX - rect.left, rect.width);
                 const startYRel = normalize(startY - rect.top, rect.height);
                 const currXRel = normalize(clientX - rect.left, rect.width);
                 const currYRel = normalize(clientY - rect.top, rect.height);
 
-                onUpdate(activeKeyframe, [
+                return [
                     startBox[0],
                     Math.max(0, Math.min(1000, Math.min(startYRel, currYRel))),
                     Math.max(0, Math.min(1000, Math.min(startXRel, currXRel))),
                     Math.max(0, Math.min(1000, Math.max(startYRel, currYRel))),
                     Math.max(0, Math.min(1000, Math.max(startXRel, currXRel)))
-                ]);
-                return;
+                ];
             }
 
             const dx = ((clientX - startX) / rect.width) * 1000;
@@ -1539,18 +1788,21 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate, onTogglePlay }: any) =>
             const finalYmin = Math.min(nYmin, nYmax);
             const finalYmax = Math.max(nYmin, nYmax);
 
-            onUpdate(activeKeyframe, [
+            return [
                 t,
                 Math.max(0, Math.min(1000, finalYmin)),
                 Math.max(0, Math.min(1000, finalXmin)),
                 Math.max(0, Math.min(1000, finalYmax)),
                 Math.max(0, Math.min(1000, finalXmax))
-            ]);
+            ];
         };
 
         const handleMove = (ev: PointerEvent) => {
             ev.preventDefault();
-            updateFromPointer(ev.clientX, ev.clientY);
+            const next = updateFromPointer(ev.clientX, ev.clientY);
+            if (!next) return;
+            draftBoxRef.current = next;
+            setDraftBox(next);
         };
 
         const handleUp = (ev: PointerEvent) => {
@@ -1559,6 +1811,14 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate, onTogglePlay }: any) =>
             window.removeEventListener('pointerup', handleUp);
             window.removeEventListener('pointercancel', handleUp);
             document.body.style.userSelect = '';
+
+            const finalBox = updateFromPointer(ev.clientX, ev.clientY);
+            if (finalBox) {
+                draftBoxRef.current = finalBox;
+                setDraftBox(finalBox);
+                onUpdate(activeKeyframe, finalBox);
+            }
+            isDraggingRef.current = false;
 
             if (mode === 'draw') {
                 const dx = ev.clientX - startX;
@@ -1576,6 +1836,7 @@ const BoxOverlay = ({ activeKeyframe, boxData, onUpdate, onTogglePlay }: any) =>
         }
 
         document.body.style.userSelect = 'none';
+        isDraggingRef.current = true;
         window.addEventListener('pointermove', handleMove);
         window.addEventListener('pointerup', handleUp);
         window.addEventListener('pointercancel', handleUp);
